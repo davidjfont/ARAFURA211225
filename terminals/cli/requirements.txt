@@ -5,14 +5,15 @@
 pyyaml>=6.0
 python-dotenv>=1.0.0
 
-# LLM Clients (opcionales, instalar según necesidad)
+# LLM Local (portable, no requiere instalación de sistema)
+llama-cpp-python>=0.2.0
+
+# LLM Clients API (opcionales, descomentar según necesidad)
 # anthropic>=0.18.0        # Para Claude
 # openai>=1.0.0            # Para GPT
-# ollama>=0.1.0            # Para modelos locales
 
 # Utilidades
 colorama>=0.4.6           # Colores cross-platform
-rich>=13.0.0              # Pretty printing (opcional)
 
 # IPFS (opcional)
 # ipfshttpclient>=0.8.0   # Para backup a IPFS
