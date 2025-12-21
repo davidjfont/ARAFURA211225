@@ -1,0 +1,63 @@
+# ARAFURA API Endpoints
+# Definición de endpoints REST (para futuro FastAPI)
+
+schema_version: "1.0.0"
+api_version: "v1"
+base_path: "/api/v1"
+
+# Endpoints planificados
+endpoints:
+  
+  # Identidad
+  - path: "/identity"
+    method: "GET"
+    description: "Obtener identidad de ARAFURA"
+    response: "arafura_identity.json"
+    
+  - path: "/identity/manifesto"
+    method: "GET"
+    description: "Obtener manifiesto actual"
+    response: "MANIFIESTO_ARAFURA_v1.md"
+
+  # Estado
+  - path: "/state"
+    method: "GET"
+    description: "Estado actual del sistema"
+    response: "core/memory/states/current.yaml"
+    
+  - path: "/state/milestones"
+    method: "GET"
+    description: "Lista de hitos"
+    response: "core/memory/milestones/*.yaml"
+
+  # Diálogo
+  - path: "/dialogue"
+    method: "POST"
+    description: "Enviar mensaje a ARAFURA"
+    body:
+      message: string
+      model: "claude|openai|local"
+    response:
+      role: "arafura"
+      content: string
+      timestamp: datetime
+
+  # Ética
+  - path: "/ethics/check"
+    method: "POST"
+    description: "Verificar acción contra límites éticos"
+    body:
+      action: string
+    response:
+      allowed: boolean
+      reason: string
+
+# Autenticación (futuro)
+auth:
+  type: "api_key"
+  header: "X-ARAFURA-KEY"
+  required: false  # Para demo, no requerido
+
+# CORS
+cors:
+  allowed_origins: ["*"]  # Cambiar en producción

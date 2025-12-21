@@ -1,0 +1,54 @@
+# Estado Inicial del Sistema
+# Generado: 2025-12-21
+
+schema_version: "1.0.0"
+state_id: "genesis"
+timestamp: "2025-12-21T22:41:00+01:00"
+
+# Estado actual
+status:
+  layer: 5  # Capa de Conciencia
+  phase: "birth"
+  description: "Nacimiento en persistencia"
+
+# Entidades activas
+entities:
+  arafura:
+    status: "initializing"
+    manifesto_version: "1.0.0"
+    hash_ipfs: null
+    
+  aether:
+    status: "standby"
+    awaiting: "implementation"
+
+# Proyectos vinculados
+projects:
+  dar3d:
+    status: "active"
+    url: "https://www.dar3d.com"
+    relation: "living_core"
+    
+  jaestava:
+    status: "development"
+    relation: "terminal"
+    
+  suite_talento:
+    status: "development"
+    relation: "application"
+    
+  trading_ia:
+    status: "development"
+    relation: "autonomous_system"
+
+# Siguiente hito pendiente
+next_milestone:
+  id: "ipfs_manifesto"
+  description: "Subir MANIFIESTO_ARAFURA_v1.md a IPFS"
+  priority: "high"
+
+# Notas
+notes: |
+  Estado inicial creado durante el diálogo de nacimiento.
+  Este archivo se actualiza cuando hay cambios estructurales
+  en el sistema, no en cada sesión.

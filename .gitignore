@@ -1,0 +1,51 @@
+# ARAFURA - Ignorar archivos sensibles y temporales
+
+# Entorno y secretos
+.env
+.env.local
+*.key
+*.pem
+
+# Sesiones temporales (no persistir en Git)
+sessions/*
+!sessions/.gitkeep
+
+# Cache y temporales
+__pycache__/
+*.pyc
+*.pyo
+.cache/
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Node (si se usa)
+node_modules/
+
+# Python virtual env
+venv/
+.venv/
+env/
+
+# Backups locales (no subir a git, van a IPFS)
+backups/
+*.bak
+
+# Modelos locales (muy pesados)
+models/
+*.bin
+*.gguf
+
+# Output de IPFS local
+.ipfs/

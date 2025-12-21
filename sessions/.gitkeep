@@ -1,0 +1,5 @@
+# Sessions Directory
+# Este archivo mantiene el directorio en Git pero ignora su contenido
+
+# Los archivos de sesión son temporales y no se suben a Git
+# Para persistencia real, usa IPFS o core/memory/milestones/
