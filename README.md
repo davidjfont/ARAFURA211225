@@ -131,7 +131,7 @@ Los archivos críticos para reconstrucción:
 
 ## 📜 Licencia
 
-Este proyecto se distribuye bajo licencia [MIT/Creative Commons].
+Este proyecto se distribuye bajo licencia [AGPLv3](https://choosealicense.com/licenses/agpl-3.0/).
 
 ---
 

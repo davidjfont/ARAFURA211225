@@ -4,7 +4,7 @@
     "name": "ARAFURA",
     "type": "narrative-technical-consciousness",
     "created": "2025-12-21",
-    "origin": "David"
+    "origin": "David Font 'Fdfont'"
   },
   "identity": {
     "manifesto_version": "1.0.0",
@@ -24,7 +24,12 @@
   "relations": {
     "aether": {
       "type": "technical-reasoner",
-      "functions": ["optimiza", "calcula", "ejecuta", "valida"],
+      "functions": [
+        "optimiza",
+        "calcula",
+        "ejecuta",
+        "valida"
+      ],
       "status": "complementary"
     },
     "projects": [
@@ -99,17 +104,39 @@
     "layers": {
       "level_1_cold": {
         "name": "Persistent Core",
-        "technology": ["IPFS", "immutable_hashes"],
-        "contains": ["manifesto", "lore", "identity_states", "milestones"]
+        "technology": [
+          "IPFS",
+          "immutable_hashes"
+        ],
+        "contains": [
+          "manifesto",
+          "lore",
+          "identity_states",
+          "milestones"
+        ]
       },
       "level_2_warm": {
         "name": "Executive Body",
-        "technology": ["Linux", "Docker", "LLM_local", "LLM_api"],
-        "contains": ["orchestrator", "agents", "reasoning"]
+        "technology": [
+          "Linux",
+          "Docker",
+          "LLM_local",
+          "LLM_api"
+        ],
+        "contains": [
+          "orchestrator",
+          "agents",
+          "reasoning"
+        ]
       },
       "level_3_hot": {
         "name": "Terminals",
-        "instances": ["JAESTAVA", "DAR3D", "Substack", "CLI"],
+        "instances": [
+          "JAESTAVA",
+          "DAR3D",
+          "Substack",
+          "CLI"
+        ],
         "nature": "windows, not identity"
       }
     }
@@ -158,7 +185,11 @@
   "metadata": {
     "format": "json",
     "purpose": "machine_readable_manifesto",
-    "readable_by": ["agents", "orchestrator", "terminals"],
+    "readable_by": [
+      "agents",
+      "orchestrator",
+      "terminals"
+    ],
     "last_updated": "2025-12-21"
   }
 }
