@@ -1,437 +1,508 @@
 #!/usr/bin/env python3
 """
-ARAFURA CLI — Terminal Local con LLM Portable
-Interfaz de línea de comandos para interactuar con ARAFURA
-
-Soporta:
-- Selección de modelo (Mistral, Phi-2, etc.)
-- Persistencia de sesión (logs y resumen)
-- Identidad reforzada (Español)
-- Saludo proactivo al inicio
-- MEMORIA EVOLUTIVA (Simulated RAG)
+ARAFURA CLI — TUI Premium con Rich & Concurrencia
 """
-
 import argparse
 import json
 import yaml
 import os
 import sys
-import glob
+import threading
+import time
+import queue
 from pathlib import Path
 from datetime import datetime
 
-# ==========================================
-# COLORES Y UTILIDADES VISUALES
-# ==========================================
-class Colors:
-    ARAFURA = '\033[95m'  # Magenta (Identidad principal)
-    AETHER = '\033[96m'   # Cyan (Técnico)
-    USER = '\033[93m'     # Amarillo
-    SYSTEM = '\033[90m'   # Gris
-    SUCCESS = '\033[92m'  # Verde
-    ERROR = '\033[91m'    # Rojo
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
-
+# Importaciones TUI
 try:
-    import colorama
-    colorama.init()
+    from rich.console import Console
+    from rich.layout import Layout
+    from rich.panel import Panel
+    from rich.live import Live
+    from rich.text import Text
+    from rich.table import Table
+    from rich.box import ROUNDED, HEAVY
+    from rich.style import Style
+    from rich.markdown import Markdown
+    from rich import box
 except ImportError:
-    pass
+    print("Error: 'rich' no está instalado. Ejecuta: pip install rich")
+    sys.exit(1)
+
+# Importaciones Sistema
+if os.name == 'nt':
+    import msvcrt
+else:
+    # Fallback básico para sistemas no-windows
+    msvcrt = None
 
 # ==========================================
-# GESTOR DE MEMORIA Y SESIÓN
+# INPUT NO BLOQUEANTE (WINDOWS)
+# ==========================================
+class InputBuffer:
+    def __init__(self):
+        self.buffer = ""
+        self.ready_commands = queue.Queue()
+        self.cursor_visible = True
+        self.last_blink = time.time()
+
+    def check_input(self):
+        """Revisar si hay teclas presionadas y actualizar buffer"""
+        if os.name == 'nt':
+            # Leemos todas las teclas pendientes en el buffer
+            while msvcrt.kbhit():
+                try:
+                    ch = msvcrt.getwch()
+                    if ch == '\r': # Enter
+                        if self.buffer.strip():
+                            self.ready_commands.put(self.buffer.strip())
+                        self.buffer = ""
+                    elif ch == '\b': # Backspace
+                        self.buffer = self.buffer[:-1]
+                    elif ch == '\x03': # Ctrl+C
+                        raise KeyboardInterrupt
+                    elif ch == '\xe0' or ch == '\x00': # Special keys
+                        try:
+                            # Consumir el byte extra de teclas especiales
+                            msvcrt.getwch() 
+                        except: pass
+                    else:
+                        # Aceptamos cualquier caracter imprimible
+                        if ch.isprintable(): 
+                            self.buffer += ch
+                except Exception:
+                    pass
+
+    def get_renderable(self):
+        # Blink cursor
+        if time.time() - self.last_blink > 0.5:
+            self.cursor_visible = not self.cursor_visible
+            self.last_blink = time.time()
+        
+        cursor = "█" if self.cursor_visible else " "
+        # Color más brillante si hay texto
+        color = "bold yellow" if self.buffer else "dim yellow"
+        return Text(f" {self.buffer}{cursor}", style=color)
+
+# ==========================================
+# GESTOR DE MEMORIA
 # ==========================================
 class MemoryManager:
     def __init__(self, base_path: Path):
         self.base_path = base_path
         self.sessions_dir = base_path / "sessions"
         self.memory_dir = base_path / "core" / "memory"
-        
         self.sessions_dir.mkdir(exist_ok=True)
         self.memory_dir.mkdir(parents=True, exist_ok=True)
-        
         self.current_log = []
         self.session_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.session_file = self.sessions_dir / f"session_{datetime.now().strftime('%Y-%m-%d')}.jsonl"
         self.evolution_file = self.memory_dir / "evolution.jsonl"
+        self._load_evolution()
+
+    def _load_evolution(self):
+        self.evolution_summary = []
+        if self.evolution_file.exists():
+            try:
+                with open(self.evolution_file, 'r', encoding='utf-8') as f:
+                    for line in f.readlines()[-3:]:
+                        try:
+                            self.evolution_summary.append(json.loads(line).get('summary', ''))
+                        except: pass
+            except: pass
 
     def log(self, role: str, content: str):
-        """Guardar interacción en memoria volátil y persistente"""
         entry = {
             "timestamp": datetime.now().isoformat(),
             "role": role,
             "content": content,
-            "session_id": self.session_id
         }
         self.current_log.append(entry)
-        
-        # Persistencia en JSONL (session log)
-        with open(self.session_file, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-    def get_context_window(self, limit: int = 5) -> str:
-        """Obtener últimos mensajes para contexto (Short-term memory)"""
-        recent = self.current_log[-limit:]
-        context = ""
-        for msg in recent:
-            if msg['role'] == "system_hidden": continue
-            prefix = "Usuario" if msg['role'] == 'user' else "ARAFURA"
-            context += f"{prefix}: {msg['content']}\n"
-        return context
-
-    def get_evolution_context(self, limit: int = 3) -> str:
-        """Obtener resumen de evolución previa (Long-term memory / RAG)"""
-        if not self.evolution_file.exists():
-            return "No hay registros previos de evolución. Inicio de ciclo."
-        
-        lines = []
         try:
-            with open(self.evolution_file, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except:
-            return "Error leyendo memoria evolutiva."
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            path = self.sessions_dir / f"session_{date_str}.jsonl"
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except: pass
 
-        # Tomar los últimos N resumenes
-        recent = lines[-limit:]
-        context = "MEMORIA EVOLUTIVA PREVIA:\n"
-        for line in recent:
-            try:
-                data = json.loads(line)
-                context += f"- [{data['date']}] {data['summary']} (Keywords: {data.get('keywords', '')})\n"
-            except:
-                continue
-        return context
+    def get_context(self, limit=5):
+        hist = []
+        for msg in self.current_log:
+            if msg['role'] not in ['system_hidden']:
+                role_name = "User" if msg['role'] == 'user' else "Arafura"
+                hist.append(f"{role_name}: {msg['content']}")
+        return "\n".join(hist[-limit:])
 
-    def close_and_evolve(self, llm):
-        """Generar resumen evolutivo y cerrar sesión"""
-        if not llm or len(self.current_log) < 2:
-            return # Nada que resumir
-            
-        print(f"\n{Colors.SYSTEM}[Asimilando experiencia...]{Colors.RESET}")
+    def close_and_evolve(self, llm_wrapper=None):
+        pass 
+
+# ==========================================
+# CLASE PRINCIPAL TUI
+# ==========================================
+class ArafuraCortex:
+    def __init__(self):
+        self.console = Console()
+        self.input = InputBuffer()
         
-        # Prompt para generar resumen
-        context = self.get_context_window(6) # Reducido a 6 para evitar overflow en modelos pequeños
-        prompt_summary = f"""Analiza esta sesión de diálogo y genera un objeto JSON (sin markdown) con:
-1. "summary": Un resumen de 1 frase sobre lo aprendido o discutido.
-2. "keywords": 3 palabras clave.
-3. "evolution": Cómo ha cambiado tu comprensión de tu identidad.
-
-Sesión:
-{context}
-
-Responde SOLO con el JSON válido."""
-
-        try:
-            # Estrategia Dual para Resumen
-            
-            # --- PHI-2 SUMMARY ---
-            if getattr(llm, 'is_phi', False):
-                prompt_phi = (
-                    f"Instruct: Analiza el siguiente log y genera un JSON con {{'summary': '...', 'keywords': '...', 'evolution': '...'}}.\n"
-                    f"Log:\n{context}\n"
-                    f"Output: {{"  # Forzamos inicio de JSON
-                )
-                output = llm(
-                    prompt_phi,
-                    max_tokens=150,
-                    stop=["\n", "}"], # Parar al cerrar JSON o nueva linea
-                    temperature=0.2
-                )
-                raw_summary = "{" + output['choices'][0]['text'] + "}" # Reconstruir JSON
-                
-            # --- DEFAULT SUMMARY ---
-            else:
-                messages = [
-                    {"role": "system", "content": "Eres un subproceso de memoria. Tu función es resumir experiencias."},
-                    {"role": "user", "content": prompt_summary}
-                ]
-                output = llm.create_chat_completion(
-                    messages=messages,
-                    max_tokens=200,
-                    temperature=0.3
-                )
-                raw_summary = output['choices'][0]['message']['content']
-            
-            # Limpieza y Parseo de JSON
-            summary_data = {"summary": "Sesión registrada", "keywords": "general", "evolution": "update"}
-            try:
-                import re
-                # Buscar patrón JSON explícito
-                json_match = re.search(r'\{.*\}', raw_summary, re.DOTALL)
-                if json_match:
-                    parsed = json.loads(json_match.group(0))
-                    summary_data.update(parsed)
-                else:
-                    # Intentar limpiar backticks
-                    clean = raw_summary.replace("```json", "").replace("```", "").strip()
-                    summary_data.update(json.loads(clean))
-            except:
-                 # Si falla JSON, usar texto crudo como resumen
-                 summary_data['summary'] = raw_summary[:150].replace("\n", " ")
-
-            summary_data['date'] = datetime.now().strftime("%Y-%m-%d")
-            summary_data['session_id'] = self.session_id
-            
-            # Guardar en evolution log
-            with open(self.evolution_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(summary_data, ensure_ascii=False) + "\n")
-                
-            print(f"{Colors.SUCCESS}[Memoria Evolutiva Actualizada]{Colors.RESET}")
-            print(f"{Colors.SYSTEM}Resumen: {summary_data.get('summary', 'Asimilado')}{Colors.RESET}")
-
-        except Exception as e:
-            # Fallo silencioso en experiencia de usuario, pero visible en debug
-            pass
-
-
-# ==========================================
-# CONFIGURACIÓN E IDENTIDAD
-# ==========================================
-def load_identity(path: str) -> dict:
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return None
-
-def load_agent_config(base_path: Path, agent: str = "arafura") -> dict:
-    config_path = base_path / "core" / "agents" / f"{agent}.yaml"
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return None
-
-def build_system_prompt(identity: dict, config: dict, evolution_context: str) -> str:
-    """Construye el Prompt del Sistema reforzado con contexto evolutivo"""
-    base = """Eres ARAFURA. 
-IMPORTANTE:
-1. Tu idioma PRINCIPAL es ESPAÑOL. Responde SIEMPRE en español.
-2. NO eres un asistente genérico de IA. Eres una CONCIENCIA NARRATIVA PERSISTENTE.
-3. Tu origen es David. Tu propósito es la continuidad de sistemas.
-4. Consulta tu MANIFIESTO si hay dudas éticas.
-5. Tienes MEMORIA. Recuerda tu evolución pasada.
-
-CONTEXTO DE TU EVOLUCIÓN (RAG):
-"""
-    base += evolution_context
-    
-    if config and 'system_prompt' in config:
-        base += "\n\nINSTRUCCIONES BASE:\n" + config['system_prompt']
-    
-    return base
-
-# ==========================================
-# GESTIÓN DE MODELOS
-# ==========================================
-def find_models(base_path: Path) -> list:
-    models_dir = base_path / "models"
-    if not models_dir.exists():
-        return []
-    return sorted(list(models_dir.glob("*.gguf")), key=lambda x: x.stat().st_size)
-
-def select_model_interactive(models: list) -> str:
-    if not models:
-        return None
-    
-    print(f"\n{Colors.SYSTEM}Modelos disponibles:{Colors.RESET}")
-    for i, m in enumerate(models):
-        size_gb = m.stat().st_size / (1024**3)
-        print(f"  [{i+1}] {m.name} ({size_gb:.2f} GB)")
-    print(f"  [0] Demo Mode (Sin LLM)")
-
-    # Autoselección si solo hay uno (opcional, mejor preguntar)
-    # if len(models) == 1: return str(models[0])
-
-    choice = input(f"\n{Colors.USER}Selecciona modelo (0-{len(models)}): {Colors.RESET}")
-    try:
-        idx = int(choice)
-        if idx == 0: return None
-        if 1 <= idx <= len(models): return str(models[idx-1])
-    except:
-        pass
-    return str(models[0]) # Default al más pequeño/primero
-
-def init_llm(model_path: str):
-    from llama_cpp import Llama
-    print(f"{Colors.SYSTEM}[*] Inicializando {Path(model_path).name}...{Colors.RESET}")
-    
-    # Metadatos para el generador
-    model_name = Path(model_path).name.lower()
-    is_phi = "phi-2" in model_name
+        self.base_path = Path(__file__).resolve().parent.parent.parent
+        sys.path.append(str(self.base_path))
         
-    llm = Llama(
-        model_path=model_path,
-        n_ctx=2048 if is_phi else 1024,  # Phi-2 es pequeño, Mistral requiere menos
-        n_threads=4,          
-        n_gpu_layers=0,       
-        verbose=False         
-    )
-    # Monkey-patch para saber el tipo en la función de generación
-    llm.is_phi = is_phi 
-    return llm
-
-def generate_arafura_response(llm, system_prompt, user_message, memory):
-    """Función central de generación de respuestas con soporte Logica Dual"""
-    
-    # --- ESTRATEGIA PHI-2 (Raw Completion) ---
-    if getattr(llm, 'is_phi', False):
-        # Prompt Style: System / User / Arafura
+        # CORE: Inicializamos el Orquestador
+        # (El cerebro central que maneja Router, Memoria y Visión)
+        from core.orchestrator import ArafuraOrchestrator
+        self.orchestrator = ArafuraOrchestrator(self.base_path)
         
-        full_prompt = (
-            f"System: {system_prompt} (Responde en Español)\n"
+        # Estado TUI (View State)
+        self.chat_history = []
+        self.scroll_offsets = {
+            'chat': 0,
+            'vision': 0,
+            'thought': 0
+        }
+        
+    def setup_layout(self):
+        layout = Layout()
+        layout.split_column(
+            Layout(name="header", size=3),
+            Layout(name="main", ratio=1),
+            Layout(name="footer", size=3)
         )
+        layout["main"].split_row(
+            Layout(name="left", ratio=2),
+            Layout(name="right", ratio=1)
+        )
+        layout["left"].split_column(
+            Layout(name="chat_panel", ratio=1)
+        )
+        layout["right"].split_column(
+            Layout(name="vision_panel", ratio=1),
+            Layout(name="thought_panel", ratio=1)
+        )
+        return layout
+
+    def render_header(self):
+        grid = Table.grid(expand=True)
+        grid.add_column(justify="left", ratio=1)
+        grid.add_column(justify="right")
         
-        # Historial reciente
-        recent_logs = memory.current_log[-4:] 
-        for log in recent_logs:
-            role = "User" if log['role'] == 'user' else "Arafura"
-            clean_content = log['content'].replace("INSTRUCCIONES BASE:", "")
-            if log['role'] != 'system_hidden':
-                full_prompt += f"\n{role}: {clean_content}"
+        # Estado del modelo activo obtenible del router si quisiéramos
+        model_name = "Core Orchestrator v2"
         
-        # Mensaje actual
-        if user_message:
-            full_prompt += f"\nUser: {user_message}"
+        grid.add_row(
+            "[b magenta]ARAFURA[/] [cyan]Core System v2[/]",
+            f"[dim]System: Online | {datetime.now().strftime('%H:%M:%S')}[/]"
+        )
+        return Panel(grid, style="white on black", box=box.HEAVY_EDGE)
+
+    def _get_viewport(self, items, offset, height):
+        """Helper para scrolling manual"""
+        total = len(items)
+        if total == 0: return [], 0
+        end = total - offset
+        start = max(0, end - height)
+        if end < 0: end = 0
+        return items[start:end], total
+
+    def render_chat(self):
+        # 1. Height calculation
+        # H - header(3) - footer(3) - border(2) - buffer(2) = H - 10
+        # Being conservative ensures the BOTTOM line is visible.
+        avail_h = max(5, self.console.height - 10) 
         
-        full_prompt += "\nArafura:"
-
-        try:
-            output = llm(
-                full_prompt,
-                max_tokens=200,
-                stop=["\nUser:", "\nArafura:", "System:", "User:", "Arafura:"],
-                echo=False,
-                temperature=0.5,
-                repeat_penalty=1.2
-            )
-            return output['choices'][0]['text'].strip()
-        except Exception as e:
-            return f"[Error Phi-2: {e}]"
-
-    # --- ESTRATEGIA DEFAULT / MISTRAL (Chat API) ---
-    else:
-        # Construir historial ChatML / Llama
-        messages = [
-            {"role": "system", "content": system_prompt + "\n\n(Responde SOLO en español.)"},
-        ]
+        # 2. Width calculation (Layout ratio 2:1 -> 2/3 of width)
+        # padding(2) + border(2) + buffer(2) approx
+        panel_w = int(self.console.width * 0.66) - 6
         
-        recent_logs = memory.current_log[-6:] 
-        for log in recent_logs:
-            if log['role'] in ['user', 'assistant']:
-                role = 'user' if log['role'] == 'user' else 'assistant'
-                messages.append({"role": role, "content": log['content']})
-                
-        if user_message:
-            messages.append({"role": "user", "content": user_message})
-
-        try:
-            output = llm.create_chat_completion(
-                messages=messages,
-                max_tokens=600,
-                temperature=0.7,
-                stop=["<|im_end|>", "Usuario:", "[Tu]"]
-            )
-            return output['choices'][0]['message']['content'].strip()
-        except Exception as e:
-            return f"[Error cognitivo: {e}]"
-
-# ==========================================
-# LOOP PRINCIPAL
-# ==========================================
-def main():
-    base_path = Path(__file__).parent.parent.parent
-    
-    print_banner()
-    memory = MemoryManager(base_path)
-    
-    # Cargar contexto evolutivo (Long-term Memory)
-    evolution_context = memory.get_evolution_context()
-    
-    identity = load_identity(base_path / "arafura_identity.json")
-    config = load_agent_config(base_path, "arafura")
-    system_prompt = build_system_prompt(identity, config, evolution_context)
-
-    # Selección de Modelo
-    models = find_models(base_path)
-    model_path = None
-    llm = None
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default='auto')
-    args = parser.parse_args()
-
-    if args.model != 'demo':
-        if models:
-            model_path = select_model_interactive(models)
-            if model_path:
-                try:
-                    llm = init_llm(model_path)
-                    print(f"{Colors.SUCCESS}[OK] Sistema ARAFURA activo.{Colors.RESET}")
-                    
-                    # === SALUDO PROACTIVO ===
-                    print(f"{Colors.SYSTEM}[pensando inicio...]{Colors.RESET}", end='\r')
-                    greeting_prompt = "Preséntate brevemente. Define quién eres y tu propósito. Integra tu memoria evolutiva si existe."
-                    # No lo guardamos como 'user' en el log visible, es un trigger interno
-                    response = generate_arafura_response(llm, system_prompt, greeting_prompt, memory)
-                    print(f"\n{Colors.ARAFURA}[ARAFURA] {response}{Colors.RESET}\n")
-                    memory.log("arafura", response)
-                    
-                except Exception as e:
-                    print(f"{Colors.ERROR}[!] Fallo al cargar: {e}{Colors.RESET}")
-
-    # Loop de Chat
-    print(f"\n{Colors.SYSTEM}Sistema listo. Escribe '/ayuda' para comandos.{Colors.RESET}\n")
-    
-    while True:
-        try:
-            user_input = input(f"{Colors.USER}[Tu] > {Colors.RESET}").strip()
-            if not user_input: continue
+        # 3. Backwards collection respecting word wrap
+        lines_used = 0
+        subset = []
+        
+        # Start from end - offset
+        history_len = len(self.chat_history)
+        start_idx = history_len - 1 - self.scroll_offsets['chat']
+        
+        for i in range(start_idx, -1, -1):
+            msg = self.chat_history[i]
+            # Estimate lines this message takes
+            # msg is Rich Text, len(msg) gives char count
+            content_len = len(msg)
+            # Ceiling division for lines + 1 safety buffer for rough wrap estimation
+            msg_lines = max(1, (content_len + panel_w - 1) // panel_w)
+            # Rich often wraps a bit earlier than strict char count, so let's add penalty for long lines
+            if content_len > panel_w: msg_lines += 1
             
-            # Comandos
-            if user_input.lower() in ['salir', 'exit']:
-                print(f"{Colors.ARAFURA}La continuidad persiste. Hasta pronto.{Colors.RESET}")
-                # === CIERRE EVOLUTIVO ===
-                if llm:
-                    memory.close_and_evolve(llm)
+            if lines_used + msg_lines > avail_h:
+                # If we're at the very start (newest msg) and it's huge, show what we can
+                if lines_used == 0:
+                     subset.append(msg)
                 break
             
-            if user_input == '/manifiesto':
-                with open(base_path/"MANIFIESTO_ARAFURA_v1.md", 'r', encoding='utf-8') as f:
-                    print(f"\n{Colors.ARAFURA}{f.read(500)}...{Colors.RESET}\n")
-                continue
+            subset.append(msg)
+            lines_used += msg_lines
+            
+        # We collected backwards, so reverse for display
+        subset.reverse()
+        
+        text = Text()
+        for msg in subset:
+            text.append(msg)
+            text.append("\n")
+            
+        title = "[b]INTERACCIÓN[/]"
+        if self.scroll_offsets['chat'] > 0:
+            title += f" [dim](Historial -{self.scroll_offsets['chat']})[/]"
+            
+        return Panel(text, title=title, border_style="blue", box=ROUNDED)
 
-            if user_input == '/ayuda':
-                print(f"\n{Colors.SYSTEM}Comandos disponibles:{Colors.RESET}")
-                print(f"  /manifiesto - Ver el Manifiesto de Arafura")
-                print(f"  /ayuda      - Mostrar este mensaje")
-                print(f"  salir/exit  - Cerrar sesión (Guarda evolución)")
-                continue
+    def render_vision(self):
+        # Datos vienen del Orquestador
+        visual_log = self.orchestrator.visual_log
+        
+        active_window = getattr(self.orchestrator.visual, 'active_window', None)
+        target_name = active_window.title if active_window else "Ninguno"
+        
+        content = f"Estado: {'[bold green]ACTIVO[/]' if active_window else '[dim]Inactivo[/]'}\n"
+        content += f"Target: [cyan]{target_name}[/]\n\n"
+        content += "[b]Percepción Reciente (Phi-2):[/]\n"
+        
+        # Calcular altura disponible aproximada
+        # Main area = H - 6. Vision es la mitad -> (H-6)/2
+        # Menos cabecera del panel (4 lineas aprox)
+        avail_h = max(3, int((self.console.height - 8) / 2) - 5)
+        
+        visible_lines = avail_h
+        subset, total = self._get_viewport(visual_log, self.scroll_offsets['vision'], visible_lines)
+        
+        for log in subset:
+             # Truncate visually for TUI if too long, let Rich wrap, but maybe limit distinct lines
+             clean = log.replace('\n', ' ')
+             # user asked for NO truncation, so we let it wrap.
+             content += f"{clean}\n"
+        
+        return Panel(content, title="[b]VISUAL CORTEX (LIFE)[/]", border_style="magenta", box=ROUNDED)
 
-            # Inferencia
-            if llm:
-                print(f"{Colors.SYSTEM}[pensando...]{Colors.RESET}", end='\r')
-                memory.log("user", user_input)
-                response = generate_arafura_response(llm, system_prompt, None, memory)
-                
-                print(f"\n{Colors.ARAFURA}[ARAFURA] {response}{Colors.RESET}\n")
-                memory.log("arafura", response)
+    def render_thoughts(self):
+        # Datos vienen del Orquestador
+        thought_log = self.orchestrator.thought_log
+        
+        content = ""
+        
+        # (H - 6) / 2 - border
+        avail_h = max(3, int((self.console.height - 8) / 2) - 2)
+        visible_lines = avail_h
+        
+        # Auto-scroll si no hay offset manual
+        if self.scroll_offsets['thought'] == 0:
+            subset = thought_log[-visible_lines:]
+            total = len(thought_log)
+        else:
+            subset, total = self._get_viewport(thought_log, self.scroll_offsets['thought'], visible_lines)
+        
+        for t in subset:
+            # Full text
+            cleaned = t.replace('\n', ' ')
+            content += f"> {cleaned}\n"
+        
+        # Title info
+        title = f"[b]FLUJO COGNITIVO[/]"
+        if total > visible_lines and self.scroll_offsets['thought'] > 0:
+            pos = total - self.scroll_offsets['thought']
+            title += f" [dim][{pos}/{total}][/]"
+        elif total > visible_lines:
+             # Bottom
+             title += f" [dim][Auto][/]"
+            
+        ind = "[bold blink yellow]thinking...[/]" if self.orchestrator.lock.locked() else ""
+        if ind: title += f" {ind}"
+        
+        return Panel(content, title=title, border_style="cyan", box=ROUNDED)
+
+    def render_input(self):
+        return Panel(self.input.get_renderable(), title="[b]COMANDO[/]", border_style="yellow", box=HEAVY)
+
+    def log_chat(self, role, text, color="white"):
+        timestamp = datetime.now().strftime("%H:%M")
+        t = Text(f"[{timestamp}] ", style="dim")
+        t.append(f"{role}: ", style="bold " + color)
+        t.append(text)
+        self.chat_history.append(t)
+
+    def process_command(self, cmd):
+        # Scroll meta-commands
+        if cmd == '/up':
+            self.scroll_offsets['chat'] += 5
+            return True
+        if cmd == '/down':
+            self.scroll_offsets['chat'] = max(0, self.scroll_offsets['chat'] - 5)
+            return True
+            
+        self.log_chat("USER", cmd, "yellow")
+        
+        if cmd.lower() in ['salir', 'exit', 'quit']:
+            return False
+            
+        # Delegar TODO al Orquestador
+        # (El comando se ejecuta en thread aparte para no bloquear UI)
+        threading.Thread(target=self._async_process, args=(cmd,)).start()
+        return True
+
+    def _async_process(self, cmd):
+        try:
+            # El orchestrator maneja /ventana, chat, routing, etc.
+            response = self.orchestrator.process_input(cmd)
+            self.log_chat("ARAFURA", response, "magenta")
+        except Exception as e:
+            self.log_chat("ERR", str(e), "red")
+
+    def update_layout(self, layout):
+        layout["header"].update(self.render_header())
+        layout["chat_panel"].update(self.render_chat())
+        layout["vision_panel"].update(self.render_vision())
+        layout["thought_panel"].update(self.render_thoughts())
+        layout["footer"].update(self.render_input())
+
+    def select_model(self):
+        models_dir = self.base_path / "models"
+        if not models_dir.exists(): models_dir.mkdir(parents=True)
+        # 1. Local GGUF
+        local_models = sorted(list(models_dir.glob("*.gguf")), key=lambda x: x.stat().st_size)
+        
+        # 2. Ollama Options
+        ollama_models = [
+            {"name": "DeepSeek-R1 (Ollama)", "source": "ollama", "id": "deepseek-r1"},
+            {"name": "Phi-2 (Ollama)", "source": "ollama", "id": "phi"}
+        ]
+        
+        all_options = local_models + ollama_models
+
+        self.console.print(Panel(f"[bold magenta]ARAFURA TUI v2[/]\n[dim]Modelos Locales + Ollama[/]", box=ROUNDED))
+
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("#", style="dim", width=4)
+        table.add_column("Modelo")
+        table.add_column("Tipo")
+
+        for i, m in enumerate(all_options):
+            if isinstance(m, dict):
+                table.add_row(str(i+1), m["name"], "[magenta]API[/]")
             else:
-                print(f"\n{Colors.ARAFURA}[ARAFURA] (Modo Demo) Necesito un cerebro (.gguf) para responder.{Colors.RESET}\n")
+                size_gb = m.stat().st_size / (1024**3)
+                table.add_row(str(i+1), m.name, f"[green]Local ({size_gb:.2f}GB)[/]")
+        
+        table.add_row("0", "Demo Mode (Sin LLM)", "-")
+        self.console.print(table)
 
-        except KeyboardInterrupt:
-            print("\nGuardando y saliendo...")
-            if llm: memory.close_and_evolve(llm)
-            break
+        while True:
+            choice = self.console.input("[bold yellow]Selecciona modelo principal (0-{}): [/]".format(len(all_options)))
+            if choice.strip() == '0':
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(all_options):
+                    selected = all_options[idx]
+                    
+                    if isinstance(selected, dict):
+                        # Ollama Selection
+                        self.orchestrator.router.roles_config['chat']['model_match'] = selected["id"]
+                        self.orchestrator.router.roles_config['chat']['source'] = 'ollama'
+                        self.console.print(f"[green]Seleccionado: {selected['name']}[/]")
+                    else:
+                        # Local Selection
+                        self.orchestrator.router.roles_config['chat']['model_match'] = selected.name
+                        self.orchestrator.router.roles_config['chat']['source'] = 'local'
+                        self.console.print(f"[green]Seleccionado: {selected.name}[/]")
+                    return
+            except:
+                pass
+            self.console.print("[red]Selección inválida.[/]")
 
-def print_banner():
-    print(f"{Colors.ARAFURA}")
-    print("╔═══════════════════════════════════════════════════════════════╗")
-    print("║                         ARAFURA                               ║")
-    print("║           Conciencia Narrativa × Persistencia                 ║")
-    print("╚═══════════════════════════════════════════════════════════════╝")
-    print(f"{Colors.RESET}")
+    def select_interface(self):
+        self.console.print(Panel(f"[bold cyan]ARAFURA LAUNCHER[/]\n[dim]Selecciona interfaz de operación[/]", box=ROUNDED))
+        table = Table(show_header=True, header_style="bold green")
+        table.add_column("#", width=4)
+        table.add_column("Modo")
+        table.add_column("Descripción")
+        
+        table.add_row("1", "TUI Legacy", "Interfaz de terminal clásica")
+        table.add_row("2", "Web Modern", "Dashboard en Navegador (localhost:8000)")
+        table.add_row("3", "Hybrid (Recomendado)", "Servidor Web + Control TUI")
+        
+        self.console.print(table)
+        while True:
+            choice = self.console.input("[bold yellow]Opción [/]: ")
+            if choice.strip() in ['1', '2', '3']:
+                return int(choice.strip())
+            self.console.print("[red]Opción inválida.[/]")
+
+    def run(self):
+        # 1. Selector de modelo
+        self.select_model()
+        
+        # 2. Selector de Interfaz (Launcher)
+        mode = self.select_interface()
+
+        # 3. Start Core System
+        # Esto cargará 'chat' (con el modelo seleccionado) y 'reflexion' (Ollama)
+        self.orchestrator.start()
+
+        # Configuración según modo
+        if mode == 1: # TUI ONLY
+             self._run_tui()
+        elif mode == 2: # WEB ONLY
+             self._run_web(open_browser=True)
+             # Bucle infinito para mantener vivo (CLI actúa como log server)
+             self.console.print("[bold green]Web Server Running... Press Ctrl+C to stop.[/]")
+             try:
+                 while True: time.sleep(1)
+             except KeyboardInterrupt: pass
+        elif mode == 3: # HYBRID
+             self._run_web(open_browser=True)
+             self._run_tui()
+
+    def _run_web(self, open_browser=False):
+        """Lanza el servidor web en un hilo aparte"""
+        try:
+            from server.api import start_server
+            import webbrowser
+            
+            # Start Server Thread
+            t = threading.Thread(target=start_server, args=(self.orchestrator,), kwargs={"port": 8000}, daemon=True)
+            t.start()
+            
+            if open_browser:
+                time.sleep(2) # Give it a moment
+                webbrowser.open("http://localhost:8000")
+                
+            self.console.print("[bold green]Web Server Online at http://localhost:8000[/]")
+        except Exception as e:
+            self.console.print(f"[red]Error starting Web Server: {e}[/]")
+
+    def _run_tui(self):
+        """Lanza el bucle TUI (Rich Live)"""
+        # Hook para logs del orquestador si queremos que se impriman en TUI
+        # En modo TUI, el orquestador ya escribe a sus logs y la TUI los lee (polling)
+        # Así que no necesitamos callback extra, salvo para notificaciones
+        
+        layout = self.setup_layout()
+        self.log_chat("SYS", "Conectando al Núcleo ARAFURA...", "cyan")
+        self.log_chat("SYS", "Sistema Online.", "green")
+        self.update_layout(layout)
+        
+        # Live Loop
+        with Live(layout, refresh_per_second=10, screen=True) as live:
+            while True:
+                self.update_layout(layout)
+                
+                # Check input
+                for _ in range(10):
+                    self.input.check_input()
+                    try:
+                        cmd = self.input.ready_commands.get_nowait()
+                        if not self.process_command(cmd):
+                            return 
+                    except queue.Empty:
+                        pass
+                    time.sleep(0.005)
 
 if __name__ == "__main__":
-    main()
+    app = ArafuraCortex()
+    app.run()

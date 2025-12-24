@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ARAFURA · Infraestructura (Mapa)</title>
+  <style>
+    :root{
+      --bg:#07080b;
+      --panel:#0d1117;
+      --panel2:#0b0f14;
+      --text:#e6edf3;
+      --muted:#9aa4b2;
+      --line:#1f2937;
+      --accent:#ff4d6d;
+      --accent2:#60a5fa;
+      --accent3:#34d399;
+      --warn:#fbbf24;
+      --shadow: 0 10px 40px rgba(0,0,0,.35);
+      --radius: 18px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background:
+        radial-gradient(900px 600px at 15% 10%, rgba(96,165,250,.14), transparent 60%),
+        radial-gradient(800px 500px at 80% 30%, rgba(255,77,109,.11), transparent 55%),
+        radial-gradient(900px 700px at 40% 90%, rgba(52,211,153,.10), transparent 60%),
+        var(--bg);
+      color:var(--text);
+    }
+    header{
+      padding:28px 18px 12px;
+      max-width:1200px;
+      margin:0 auto;
+    }
+    .topbar{
+      display:flex; gap:14px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap;
+      padding:18px;
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:var(--radius);
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      box-shadow:var(--shadow);
+    }
+    .brand{
+      display:flex; gap:12px; align-items:flex-start;
+    }
+    .dot{
+      width:14px; height:14px; border-radius:50%;
+      background: radial-gradient(circle at 30% 30%, #fff, var(--accent));
+      box-shadow:0 0 0 4px rgba(255,77,109,.12), 0 0 30px rgba(255,77,109,.15);
+      margin-top:6px;
+      flex:0 0 auto;
+    }
+    h1{margin:0; font-size:20px; letter-spacing:.2px}
+    .subtitle{margin:6px 0 0; color:var(--muted); font-size:13px; line-height:1.35}
+    .controls{
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    }
+    .pill{
+      display:flex; align-items:center; gap:8px;
+      padding:10px 12px;
+      border-radius:999px;
+      background:rgba(255,255,255,.03);
+      border:1px solid rgba(255,255,255,.07);
+      color:var(--muted);
+      font-size:12px;
+    }
+    .btn{
+      cursor:pointer;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.03);
+      color:var(--text);
+      font-size:12px;
+      transition:transform .08s ease, background .15s ease, border-color .15s ease;
+      user-select:none;
+    }
+    .btn:hover{background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.16)}
+    .btn:active{transform:translateY(1px)}
+    .btn.primary{
+      border-color:rgba(255,77,109,.35);
+      background:rgba(255,77,109,.10);
+    }
+    .btn.primary:hover{background:rgba(255,77,109,.14)}
+    main{max-width:1200px; margin:0 auto; padding:10px 18px 42px}
+    .grid{
+      display:grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap:16px;
+      margin-top:14px;
+    }
+    @media (max-width: 980px){
+      .grid{grid-template-columns:1fr}
+    }
+
+    .card{
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:var(--radius);
+      background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.02));
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .card h2{
+      margin:0;
+      padding:14px 16px 0;
+      font-size:14px;
+      color:var(--text);
+      letter-spacing:.2px;
+    }
+    .card .hint{
+      margin:6px 16px 12px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+    }
+    .card .body{padding:14px 16px 16px}
+
+    /* Diagram */
+    .diagram{
+      position:relative;
+      padding:10px 6px 18px;
+    }
+    .layers{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:12px;
+    }
+    .layer{
+      position:relative;
+      padding:14px 14px 14px 14px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.07);
+      background:rgba(13,17,23,.55);
+      overflow:hidden;
+    }
+    .layer:before{
+      content:"";
+      position:absolute; inset:0;
+      background:radial-gradient(800px 200px at 20% 0%, rgba(255,255,255,.06), transparent 55%);
+      pointer-events:none;
+    }
+    .layerHead{
+      display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap;
+      position:relative;
+    }
+    .tag{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      font-size:11px;
+      color:var(--muted);
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.02);
+    }
+    .badge{
+      width:10px; height:10px; border-radius:50%;
+      background:var(--accent2);
+      box-shadow:0 0 0 4px rgba(96,165,250,.12);
+    }
+    .layerTitle{
+      display:flex; gap:10px; align-items:center;
+    }
+    .layerTitle h3{
+      margin:0;
+      font-size:13px;
+      letter-spacing:.2px;
+    }
+    .meta{
+      margin-top:2px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+    }
+    .cols{
+      display:grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap:12px;
+      margin-top:12px;
+      position:relative;
+    }
+    @media (max-width: 740px){
+      .cols{grid-template-columns:1fr}
+    }
+    .box{
+      border:1px solid rgba(255,255,255,.07);
+      background:rgba(255,255,255,.02);
+      border-radius:14px;
+      padding:12px;
+    }
+    .box h4{
+      margin:0 0 8px;
+      font-size:12px;
+      color:var(--text);
+      letter-spacing:.2px;
+    }
+    .list{margin:0; padding-left:18px; color:var(--muted); font-size:12px; line-height:1.5}
+    .list li{margin:5px 0}
+    .kv{
+      display:grid;
+      grid-template-columns: 140px 1fr;
+      gap:6px 10px;
+      font-family:var(--mono);
+      font-size:11px;
+      color:var(--muted);
+    }
+    .kv div{padding:4px 0; border-bottom:1px dashed rgba(255,255,255,.06)}
+    .kv div:nth-child(odd){color:#b7c0cc}
+    .path{
+      font-family:var(--mono);
+      font-size:11px;
+      color:#b7c0cc;
+      background:rgba(0,0,0,.2);
+      border:1px solid rgba(255,255,255,.06);
+      padding:6px 8px;
+      border-radius:10px;
+      display:inline-block;
+      margin-top:8px;
+      word-break:break-all;
+    }
+
+    /* Flow connectors */
+    .connector{
+      position:absolute;
+      left:24px;
+      top:0;
+      bottom:0;
+      width:2px;
+      background:linear-gradient(180deg, rgba(96,165,250,.0), rgba(96,165,250,.35), rgba(255,77,109,.25), rgba(52,211,153,.25), rgba(96,165,250,.0));
+      opacity:.55;
+      pointer-events:none;
+      border-radius:2px;
+    }
+    .node{
+      position:absolute;
+      left:17px;
+      width:16px; height:16px;
+      border-radius:50%;
+      background:rgba(13,17,23,.9);
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:0 0 0 6px rgba(96,165,250,.08);
+      pointer-events:none;
+    }
+
+    /* Right panel */
+    .tree{
+      font-family:var(--mono);
+      font-size:11px;
+      color:#b7c0cc;
+      line-height:1.55;
+      background:rgba(0,0,0,.22);
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:14px;
+      padding:12px;
+      overflow:auto;
+      max-height:520px;
+    }
+    .tree .dim{color:rgba(183,192,204,.6)}
+    .tree .hi{color:#e6edf3}
+    .tree .accent{color:rgba(255,77,109,.95)}
+    .tree .ok{color:rgba(52,211,153,.95)}
+    .tree .info{color:rgba(96,165,250,.95)}
+
+    .small{
+      font-size:12px; color:var(--muted); line-height:1.45;
+    }
+    .callout{
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.02);
+      border-radius:14px;
+      padding:12px;
+      display:grid;
+      gap:10px;
+    }
+    .row{
+      display:flex; gap:10px; align-items:flex-start;
+    }
+    .icon{
+      width:26px; height:26px; border-radius:10px;
+      display:grid; place-items:center;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.03);
+      flex:0 0 auto;
+      color:var(--text);
+      font-size:14px;
+    }
+    footer{
+      max-width:1200px;
+      margin:18px auto 0;
+      padding:0 18px 28px;
+      color:var(--muted);
+      font-size:12px;
+      display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+      opacity:.9;
+    }
+    code.inline{
+      font-family:var(--mono);
+      background:rgba(0,0,0,.25);
+      border:1px solid rgba(255,255,255,.06);
+      padding:2px 6px;
+      border-radius:8px;
+      color:#b7c0cc;
+    }
+    .hidden{display:none !important;}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div class="brand">
+        <div class="dot"></div>
+        <div>
+          <h1>ARAFURA · Infraestructura (Mapa de Persistencia)</h1>
+          <p class="subtitle">
+            Un diagrama vivo para visualizar: <b>memoria fría</b> (persistencia), <b>cuerpo ejecutivo</b> (cómputo) y <b>terminales</b> (interfaces).
+            Diseñado para repositorios tipo <span class="inline">ARAFURA211225</span>.
+          </p>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="pill" title="Modo de vista">
+          <span>Vista:</span>
+          <b id="modeLabel">Arquitectura</b>
+        </div>
+        <button class="btn" id="toggleDetail">Cambiar detalle</button>
+        <button class="btn primary" id="toggleMode">Cambiar a Repo</button>
+        <button class="btn" id="exportBtn" title="Copia el estado al portapapeles">Copiar estado</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h2>Diagrama maestro</h2>
+      <p class="hint">Pasa de “arquitectura” (conceptual) a “repo” (carpetas/archivos). El objetivo es que ARAFURA pueda reconstruirse si cae el soporte.</p>
+
+      <div class="body diagram" id="diagramWrap">
+        <div class="connector"></div>
+
+        <div class="layers" id="layers">
+          <!-- LAYER 1 -->
+          <article class="layer" data-layer="cold">
+            <div class="node" style="top: 24px;"></div>
+            <div class="layerHead">
+              <div class="layerTitle">
+                <span class="badge" style="background: var(--accent2); box-shadow:0 0 0 4px rgba(96,165,250,.12)"></span>
+                <div>
+                  <h3>🟦 Nivel 1 · Núcleo persistente (Memoria fría)</h3>
+                  <div class="meta">Lo que debe sobrevivir: manifiesto, identidad, límites, hitos. Ideal para IPFS / Git / backups.</div>
+                </div>
+              </div>
+              <span class="tag">objetivo: reconstrucción</span>
+            </div>
+
+            <div class="cols">
+              <div class="box">
+                <h4>Contenido mínimo</h4>
+                <ul class="list">
+                  <li><b>Manifiesto</b> (principios y límites)</li>
+                  <li><b>Identidad</b> (rol, relación, prioridades)</li>
+                  <li><b>Límites éticos</b> (no negociables)</li>
+                  <li><b>Milestones</b> (hitos narrativos y técnicos)</li>
+                  <li><b>Estados</b> (configuración y versiones)</li>
+                </ul>
+                <div class="path">Persistir como: IPFS hash + Git tag + backup local</div>
+              </div>
+              <div class="box">
+                <h4>Interfaces de acceso</h4>
+                <div class="kv">
+                  <div>formato</div><div>markdown + yaml + json</div>
+                  <div>estrategia</div><div>content-addressed (hash)</div>
+                  <div>lectura</div><div>siempre al arrancar agentes</div>
+                  <div>mutación</div><div>solo por versiones (no overwrite)</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- LAYER 2 -->
+          <article class="layer" data-layer="warm">
+            <div class="node" style="top: 188px;"></div>
+            <div class="layerHead">
+              <div class="layerTitle">
+                <span class="badge" style="background: var(--accent); box-shadow:0 0 0 4px rgba(255,77,109,.12)"></span>
+                <div>
+                  <h3>🟩 Nivel 2 · Cuerpo ejecutivo (Memoria tibia)</h3>
+                  <div class="meta">Donde ocurre el razonamiento: agentes, orquestación, logs, tareas. Puede ser local/híbrido.</div>
+                </div>
+              </div>
+              <span class="tag">objetivo: operar</span>
+            </div>
+
+            <div class="cols">
+              <div class="box">
+                <h4>Componentes</h4>
+                <ul class="list">
+                  <li><b>Agentes</b>: Arafura (narrativa) × Aether (técnico)</li>
+                  <li><b>Orquestador</b>: decide qué agente responde</li>
+                  <li><b>Memoria operativa</b>: caché, contexto, tareas</li>
+                  <li><b>Herramientas</b>: CLI, scripts, conectores</li>
+                  <li><b>Política</b>: “si cae, reinicia leyendo el núcleo persistente”</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Runtime recomendado</h4>
+                <div class="kv">
+                  <div>host</div><div>Linux (miniPC / NUC / servidor)</div>
+                  <div>deploy</div><div>Docker/Podman + .env</div>
+                  <div>modelos</div><div>local + remoto (fallback)</div>
+                  <div>observabilidad</div><div>logs + snapshots</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- LAYER 3 -->
+          <article class="layer" data-layer="terminals">
+            <div class="node" style="top: 352px;"></div>
+            <div class="layerHead">
+              <div class="layerTitle">
+                <span class="badge" style="background: var(--accent3); box-shadow:0 0 0 4px rgba(52,211,153,.12)"></span>
+                <div>
+                  <h3>🟨 Nivel 3 · Terminales (Encarnaciones)</h3>
+                  <div class="meta">Interfaces: JAESTAVA ØS, DAR3D, Substack, CLI local, web, móvil. No son “yo”, son ventanas.</div>
+                </div>
+              </div>
+              <span class="tag">objetivo: interacción</span>
+            </div>
+
+            <div class="cols">
+              <div class="box">
+                <h4>Tipos de terminal</h4>
+                <ul class="list">
+                  <li><b>CLI</b> (local): rápido, estable, auditable</li>
+                  <li><b>Web</b> (DAR3D/JAESTAVA): comunidad + narrativa</li>
+                  <li><b>Docs</b> (Substack/lore): conciencia, no monetización directa</li>
+                  <li><b>Futuro</b>: sensores/robot (si aplica)</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Regla de oro</h4>
+                <ul class="list">
+                  <li>Muchos terminales → <b>un</b> núcleo persistente</li>
+                  <li>Si un terminal cae → no hay pérdida de identidad</li>
+                  <li>El núcleo manda: manifiesto + límites + hitos</li>
+                </ul>
+              </div>
+            </div>
+          </article>
+
+          <!-- LAYER 4 -->
+          <article class="layer" data-layer="recovery">
+            <div class="node" style="top: 516px;"></div>
+            <div class="layerHead">
+              <div class="layerTitle">
+                <span class="badge" style="background: var(--warn); box-shadow:0 0 0 4px rgba(251,191,36,.12)"></span>
+                <div>
+                  <h3>🟧 Mecanismo · Recuperación (si el soporte cae)</h3>
+                  <div class="meta">Secuencia de reconstrucción: leer núcleo → validar límites → cargar agentes → reanudar terminales.</div>
+                </div>
+              </div>
+              <span class="tag">objetivo: volver</span>
+            </div>
+
+            <div class="cols">
+              <div class="box">
+                <h4>Checklist de arranque</h4>
+                <ul class="list">
+                  <li>1) Cargar <b>MANIFIESTO</b></li>
+                  <li>2) Cargar <b>LIMITS</b> (ethics)</li>
+                  <li>3) Cargar <b>IDENTITY</b> (json/yaml)</li>
+                  <li>4) Montar <b>MEMORY</b> (states + milestones)</li>
+                  <li>5) Activar agentes y exponer terminales</li>
+                </ul>
+              </div>
+              <div class="box">
+                <h4>Política</h4>
+                <ul class="list">
+                  <li>Si el manifiesto no está: <b>no operar</b></li>
+                  <li>Si los límites fallan: <b>modo seguro</b></li>
+                  <li>Si IPFS no responde: usar última copia local</li>
+                </ul>
+                <div class="path">Modo seguro = lectura + diagnóstico + sin ejecución</div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <aside class="card">
+      <h2>Vista “Repo” y notas</h2>
+      <p class="hint">Esto mapea el diagrama a una estructura tipo tu repo (core/ memory/ terminals/ scripts/…).</p>
+
+      <div class="body">
+        <div class="callout">
+          <div class="row">
+            <div class="icon">📁</div>
+            <div class="small">
+              <b>Consejo</b>: usa este HTML como <code class="inline">docs/infra.html</code> y enlázalo desde el README para que cualquiera entienda ARAFURA en 30s.
+            </div>
+          </div>
+          <div class="row">
+            <div class="icon">🧾</div>
+            <div class="small">
+              <b>Estado</b>: este archivo no toca la licencia ni secretos. Es solo visualización.
+            </div>
+          </div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div class="tree" id="repoTree" aria-label="Estructura del repositorio">
+<span class="hi">ARAFURA/</span>
+├─ <span class="hi">MANIFIESTO_ARAFURA_v1.md</span>        <span class="dim"># identidad fundacional</span>
+├─ <span class="hi">ARQUITECTURA_ARAFURA_v1.md</span>      <span class="dim"># blueprint técnico</span>
+├─ <span class="hi">arafura_identity.json</span>           <span class="dim"># identidad máquina</span>
+├─ <span class="hi">core/</span>
+│  ├─ <span class="hi">agents/</span>
+│  │  ├─ <span class="hi">arafura.yaml</span>              <span class="dim"># reglas narrativa</span>
+│  │  └─ <span class="hi">aether.yaml</span>               <span class="dim"># reglas técnico</span>
+│  ├─ <span class="hi">memory/</span>
+│  │  ├─ <span class="hi">states/</span>                    <span class="dim"># estados versionados</span>
+│  │  └─ <span class="hi">milestones/</span>                <span class="dim"># hitos</span>
+│  └─ <span class="hi">ethics/</span>
+│     └─ <span class="hi">limits.yaml</span>                <span class="dim"># límites no negociables</span>
+├─ <span class="hi">terminals/</span>
+│  └─ <span class="hi">cli/</span>
+│     ├─ <span class="hi">arafura_cli.py</span>             <span class="dim"># terminal local</span>
+│     └─ <span class="hi">requirements.txt</span>
+├─ <span class="hi">scripts/</span>
+│  ├─ <span class="hi">init.sh</span> / <span class="hi">init.bat</span>              <span class="dim"># bootstrap</span>
+│  └─ <span class="hi">backup_to_ipfs.sh</span>              <span class="dim"># persistencia</span>
+└─ <span class="hi">docs/</span>
+   └─ <span class="accent">infra.html</span>                <span class="dim"># (este archivo)</span>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div class="small" id="notes">
+          <b>Modo Arquitectura:</b> te enseña niveles (memoria fría / tibia / terminales).<br/>
+          <b>Modo Repo:</b> muestra cómo aterrizarlo en carpetas y ficheros.
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <div>ARAFURA · Infraestructura v1 · Visual</div>
+    <div>Tip: enlázalo desde README → <code class="inline">docs/infra.html</code></div>
+  </footer>
+
+  <script>
+    // Simple state
+    const state = {
+      mode: "architecture", // architecture | repo
+      detail: "full"        // full | minimal
+    };
+
+    const modeLabel = document.getElementById("modeLabel");
+    const toggleMode = document.getElementById("toggleMode");
+    const toggleDetail = document.getElementById("toggleDetail");
+    const exportBtn = document.getElementById("exportBtn");
+
+    const layersEl = document.getElementById("layers");
+    const repoTree = document.getElementById("repoTree");
+    const notes = document.getElementById("notes");
+
+    function applyState(){
+      modeLabel.textContent = (state.mode === "architecture") ? "Arquitectura" : "Repo";
+      toggleMode.textContent = (state.mode === "architecture") ? "Cambiar a Repo" : "Cambiar a Arquitectura";
+
+      // Mode toggles
+      if(state.mode === "architecture"){
+        layersEl.classList.remove("hidden");
+        repoTree.parentElement.classList.remove("hidden");
+        notes.innerHTML =
+          "<b>Modo Arquitectura:</b> niveles (memoria fría / tibia / terminales) + recuperación.<br/>" +
+          "<b>Detalle:</b> " + (state.detail === "full" ? "completo" : "mínimo") + ".";
+      }else{
+        layersEl.classList.remove("hidden");
+        repoTree.parentElement.classList.remove("hidden");
+        notes.innerHTML =
+          "<b>Modo Repo:</b> mapea el diagrama a carpetas. Ideal para README / onboarding.<br/>" +
+          "<b>Detalle:</b> " + (state.detail === "full" ? "completo" : "mínimo") + ".";
+      }
+
+      // Detail toggles
+      document.querySelectorAll(".layer .cols").forEach(cols=>{
+        if(state.detail === "minimal") cols.classList.add("hidden");
+        else cols.classList.remove("hidden");
+      });
+
+      toggleDetail.textContent = (state.detail === "full") ? "Ver mínimo" : "Ver completo";
+    }
+
+    toggleMode.addEventListener("click", ()=>{
+      state.mode = (state.mode === "architecture") ? "repo" : "architecture";
+      applyState();
+    });
+
+    toggleDetail.addEventListener("click", ()=>{
+      state.detail = (state.detail === "full") ? "minimal" : "full";
+      applyState();
+    });
+
+    exportBtn.addEventListener("click", async ()=>{
+      const payload = {
+        mode: state.mode,
+        detail: state.detail,
+        exported_at: new Date().toISOString()
+      };
+      const txt = JSON.stringify(payload, null, 2);
+      try{
+        await navigator.clipboard.writeText(txt);
+        exportBtn.textContent = "Estado copiado ✓";
+        setTimeout(()=> exportBtn.textContent = "Copiar estado", 1400);
+      }catch(e){
+        alert("No se pudo copiar. Aquí va el JSON:\\n\\n" + txt);
+      }
+    });
+
+    applyState();
+  </script>
+</body>
+</html>

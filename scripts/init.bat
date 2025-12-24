@@ -43,6 +43,7 @@ REM Instalar dependencias
 if exist "terminals\cli\requirements.txt" (
     echo [*] Instalando dependencias...
     pip install -r "terminals\cli\requirements.txt" -q
+    pip install pyautogui pywin32 -q
     echo [OK] Dependencias instaladas
 ) else (
     echo [!] requirements.txt no encontrado - saltando
@@ -71,14 +72,22 @@ echo ========================================
 echo.
 echo [1] Ejecutar ARAFURA CLI
 echo [2] Salir (entorno activado)
+echo [3] Mapear Coordenadas (Debug Mouse)
 echo.
-set /p choice="Elige opcion (1/2): "
+set /p choice="Elige opcion (1-3): "
 
 if "%choice%"=="1" (
     echo.
     echo [*] Iniciando ARAFURA CLI...
     echo.
     python "terminals\cli\arafura_cli.py"
+)
+
+if "%choice%"=="3" (
+    echo.
+    echo [*] Iniciando Debug Mouse...
+    echo.
+    python "scripts\debug_mouse.py"
 )
 
 echo.

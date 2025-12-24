@@ -17,3 +17,12 @@ colorama>=0.4.6           # Colores cross-platform
 
 # IPFS (opcional)
 # ipfshttpclient>=0.8.0   # Para backup a IPFS
+
+# Visual Agent
+pyautogui
+pygetwindow
+pillow
+opencv-python
+
+# TUI
+rich>=13.0.0

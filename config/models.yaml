@@ -1,0 +1,38 @@
+roles:
+  # Capa 1: Reflejos rápidos y pensamientos de fondo
+  reflexion:
+    source: "ollama"
+    model_match: "phi"
+    task_types: ["background_thought", "quick_check", "reflexion"]
+    params:
+      n_ctx: 2048
+      temperature: 0.8
+
+  # Capa Visual (Ollama LLaVA)
+  vision:
+    source: "ollama"
+    model_match: "llava" 
+    task_types: ["visual_perception", "image_analysis"]
+    params:
+      n_ctx: 4096 # Increased for better resolution handling
+      temperature: 0.1  # Creativo para "pensamientos"
+
+  # Capa 2: Interacción general y narrativa
+  chat:
+    model_match: "mistral" 
+    task_types: ["chat", "summary", "translation", "lang=ES"]
+    params:
+      n_ctx: 4096
+      temperature: 0.7
+
+  # Capa 3: Razonamiento Profundo (DeepSeek Local GGUF)
+  deep_thought:
+    model_match: "DeepSeek-R1-Distill-Llama-8B-Q4_K_M"
+    task_types: ["complex_logic", "code_generation", "strategic_planning", "market_analysis"]
+    params:
+      n_ctx: 8192
+      temperature: 0.1
+
+paths:
+  # Ruta base relativa al proyecto (se ajustará en runtime)
+  models_dir: "models" 
