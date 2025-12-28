@@ -1,0 +1,552 @@
+﻿
+
+    
+    
+    
+    
+    Análisis Técnico de la Plataforma de IA ARAFURA (ARAFURA211225)
+
+    
+    Arquitectura General y Componentes Principales
+
+    Estructura Modular: ARAFURA es una plataforma de inteligencia artificial multimodal construida con una arquitectura modular. En su núcleo está un Orquestador Cognitivo, considerado el “cerebro” del sistema, que se encarga de coordinar la memoria, los bucles de autonomía y la invocación de distintos modelos de IA[1][2]. Alrededor de este núcleo se disponen varios componentes clave:
+
+    Interfaces de Usuario: Ofrece dos formas de interacción: una interfaz web de estilo moderno (diseño glassmorphism) y una interfaz de línea de comandos (CLI) tipo terminal[3]. El usuario puede comunicarse con ARAFURA vía web (p. ej. desde un navegador en http://localhost:8000) o directamente por consola, según prefiera. Ambas interfaces se conectan con el orquestador mediante un servidor backend FastAPI[4]. En la práctica, las peticiones del usuario (texto de conversación o comandos) viajan desde la interfaz (Web o CLI) al servidor, y de ahí al orquestador para ser procesadas, devolviendo luego las respuestas a la interfaz correspondiente.
+
+    Orquestador Autónomo (Cerebro): Es el componente central que controla la lógica de alto nivel. Implementa un bucle de vida autónomo denominado SIMA (por Scalable Instructable Multiworld Agent, en alusión al agente generalista de Google DeepMind)[5][6]. Este orquestador observa el entorno, toma decisiones y ejecuta acciones sin necesidad de órdenes explícitas constantes[7]. Para ello se apoya en subcomponentes internos:
+
+    Un Gestor de Memoria para manejo de contexto e historial (almacena eventos en archivos JSONL)[8][9].
+
+    Un Módulo de Autonomía que implementa el bucle SIMA o “bucle de vida”: en ciclos regulares el agente observa (captura la pantalla), evalúa la situación y actúa si es necesario[10]. Este bucle le permite funcionar de forma continua y persistente, reaccionando a cambios en el entorno sin intervención del usuario. Cuando la autonomía está activa, las acciones decididas se ejecutan usando entradas de teclado/ratón simuladas en el sistema operativo (por ejemplo, clics, tecleo, scroll)[11]. El sistema etiqueta en los logs todas las acciones autónomas con el prefijo [SIMA] para transparenciar su actividad al usuario[12].
+
+    Un Router de Modelos Neuronales, que funciona como un “encaminador” entre el orquestador y varios modelos de IA especializados[13]. Según la naturaleza de cada tarea o pregunta, el orquestador delega en el modelo más adecuado a través de este router.
+
+    Módulo de Visión (Cortex Visual): ARAFURA posee “ojos” digitales que le permiten ver e interpretar lo que ocurre en la pantalla del computador en tiempo real[14][15]. Esto se logra capturando screenshots de ventanas activas y procesándolos con un modelo de visión (ver sección de modelos abajo). La capacidad visual opera típicamente a una resolución alta (contexto 4K) para percibir detalles de la interfaz gráfica[15]. Al activar el modo Visión, la plataforma muestra en la interfaz web un panel llamado “Visual Cortex” donde se actualizan las imágenes percibidas cada ~15 segundos, simulando la vista del agente[16]. De este modo, ARAFURA “observa” la pantalla como lo haría un humano y puede, por ejemplo, identificar botones, texto o elementos relevantes en distintas aplicaciones.
+
+    Memoria y Sesiones: La plataforma registra todas las interacciones y eventos en archivos de log diarios (sessions/session_YYYY-MM-DD.jsonl)[9]. Esto incluye mensajes de chat, percepciones visuales, pensamientos del agente y acciones realizadas. Esta traza permanente no solo brinda transparencia al usuario, sino que también sirve para re-entrenar o analizar el comportamiento del sistema a posteriori[9]. La memoria de corto plazo (contexto activo) se maneja mediante la combinación de este historial y técnicas de resumen o recorte (dado que los modelos tienen límite de contexto). Actualmente el gestor de memoria almacena el historial en texto (JSONL) y lo provee al orquestador para dar contexto a los modelos, si bien no emplea aún una base de conocimientos vectorial ni memorias a largo plazo más sofisticadas – esto representa un área potencial de mejora (ver recomendaciones).
+
+    Componentes de Acción: A fin de ejecutar decisiones, ARAFURA cuenta con rutinas para simular entrada de usuario en el sistema operativo. Por ejemplo, puede mover el cursor y hacer clic en coordenadas específicas de la pantalla, ingresar pulsaciones de teclas o combinaciones (p. ej. Ctrl+C), hacer doble clic, desplazar el cursor arrastrando objetos, o esperar ciertos segundos[11]. Estas acciones se formatean en las salidas del modelo entre etiquetas [[ACTION: ...]] y son interpretadas por el módulo de autonomía para llevarse a cabo realmente en el entorno del usuario[17]. Para listar las ventanas disponibles para visión o conectar con una específica, el sistema provee comandos (/ventana) que permiten elegir el handle de la ventana objetivo[18]. Internamente, es probable que se usen librerías de automatización (como PyAutoGUI u otras específicas por SO) para realizar la captura de pantalla y la inyección de eventos de mouse/teclado a nivel del sistema.
+
+    Interfaz Web (Frontend): El componente web (carpeta web/) consiste en una aplicación cliente que muestra el chat en tiempo real, el panel visual y controles. Está construida con HTML, CSS y JavaScript ( ~~7% del código del repositorio)[19]. El estilo glassmorphism sugiere un diseño translúcido y moderno. Es probable que use librerías ligeras o incluso código JavaScript nativo dada la proporción de código (no se ha indicado explícitamente el uso de frameworks pesados). Esta interfaz se comunica con el backend mediante API REST (provista por FastAPI en Python) para enviar mensajes del usuario y recibir respuestas del agente o actualizaciones visuales.
+
+    Backend y Configuración: El servidor (carpeta server/) es una aplicación Python (FastAPI) que expone endpoints para el frontend y orquesta los subprocesos. El proyecto incluye archivos de configuración (config/) y ejemplos de entorno (.env.example), lo que sugiere que variables como rutas de modelos, claves (si las hubiera) o parámetros se establecen allí. También existen scripts utilitarios (carpeta scripts/ y archivos diagnose_*.py) para diagnosticar componentes individuales: por ejemplo diagnose_capture.py puede probar la captura de pantalla, diagnose_vision.py la inferencia visual, diagnose_orch.py el orquestador, etc., facilitando pruebas unitarias del sistema.
+
+    En conjunto, la arquitectura de ARAFURA está bien organizada en capas: Interfaces (Web/CLI) ? Servidor API ? Orquestador (cerebro) ? Modelos de IA especializados, con módulos auxiliares para memoria, visión y acciones. Esta separación por responsabilidades mejora la mantenibilidad y permite reemplazar o actualizar componentes (por ejemplo, actualizar un modelo por otro) sin reescribir todo el sistema.
+
+    
+    
+    Flujo de Datos y Funcionamiento Interno
+
+    A continuación describimos el flujo típico de operación de ARAFURA, integrando los componentes mencionados:
+1. 
+    Interacción del Usuario: El ciclo inicia con el usuario, que puede enviar mensajes de texto o comandos. Esto ocurre ya sea escribiendo en la consola (CLI) o mediante la interfaz web (en la caja de chat). Por ejemplo, el usuario puede preguntar algo en lenguaje natural, dar una instrucción (e.g. “abre tal programa”), o ingresar un comando especial del sistema (precedido por /).
+2. 
+    Recepción en el Backend: La entrada del usuario viaja al servidor FastAPI. En caso de la interfaz web, esta comunicación suele ser vía HTTP/REST o websockets. El servidor unifica la entrada en un formato que el orquestador pueda manejar (por ejemplo, encapsula mensajes de chat y comandos en objetos con metadatos como timestamp, autor, tipo de mensaje, etc., y los guarda también en el log JSONL de la sesión[9]).
+3. 
+    Procesamiento por el Orquestador: El orquestador recibe la nueva entrada y la analiza. Si es un comando de sistema (p.ej. /mode vision), ajusta el modo operativo o desencadena una acción interna en lugar de consultarle a un modelo[20]. Por ejemplo, si el usuario teclea /mode vision, ARAFURA activará el módulo de visión (comenzará a capturar la ventana activa periódicamente y a describirla). Si es /gamer, cambiará a Modo Gamer con un bucle de 3s y comportamiento agresivo[21][22]. Estos comandos permiten al usuario controlar la configuración del agente en tiempo real.
+
+    Si en cambio la entrada del usuario es texto libre (una pregunta, orden o diálogo), el orquestador la tratará como mensaje de conversación. En este caso, invoca al Router de Modelos para obtener la mejor respuesta: - En modo chat normal (texto): El router enviará el historial relevante (incluyendo la nueva pregunta) al modelo de lenguaje principal (modelo de chat) para generar una respuesta conversacional. - En modo visión activa: Ante cada ciclo o ante preguntas sobre lo que “ve”, el orquestador primero obtendrá una descripción de la pantalla. Es decir, capturará la imagen de la ventana objetivo, la pasará al modelo visual (LLaVA) vía router, y obtendrá una descripción o detección de elementos[14]. Esa información se agrega al contexto. El orquestador luego puede preguntar a modelos de razonamiento si hace falta interpretar la situación o decidir una acción. - En tareas complejas: El orquestador puede descomponer la tarea. Por ejemplo, si el usuario pide “Por favor, compra acciones cuando suban 5%”, ARAFURA podría entrar en un bucle de vigilancia: usar visión para monitorear una pantalla financiera, reflexión para decidir el momento y luego acciones de clic. Este es solo un ejemplo hipotético de coordinación de módulos.
+
+    Importante: el orquestador también puede actuar por iniciativa propia en modos autónomos. En el bucle SIMA, sin entrada nueva del usuario, periódicamente se genera internamente un ciclo donde: - El módulo de Autonomía captura la pantalla y la envía al modelo visual. - Se analizan “señales de prosperidad o riesgo” en la imagen[12] – esto hace pensar que ARAFURA mantiene algún criterio para saber si la situación actual es favorable o si requiere intervención. Por ejemplo, en un videojuego puede ser la puntuación subiendo/bajando; en una tarea de trabajo podría ser detectar una condición cumplida. - Luego, el orquestador decide si tomar acción: si ciertas condiciones se cumplen, puede formular internamente una instrucción de acción (por ejemplo “[[ACTION: click 123, 456]]”) que pasará al módulo de acciones para ejecutarse[17]. Si no hay nada que hacer, el sistema simplemente espera al siguiente ciclo. - Todo este proceso se registra en el log (observación -> evaluación -> acción).
+1. 
+    Invocación de Modelos (Inferencia): Según lo decidido en el paso anterior, el Router de Modelos delega a los distintos modelos de IA:
+2. 
+    Para una respuesta de chat, envía el prompt (instrucción + contexto) al modelo lingüístico principal (un LLM).
+3. 
+    Para una descripción visual, envía la imagen capturada al modelo visual.
+4. 
+    Para razonamiento o pasos intermedios, puede invocar modelos especializados (p. ej. un modelo de reflexión de menor tamaño, o un modelo lógico).
+5. 
+    Para ciertas operaciones, podría combinar resultados (ejemplo: en modo dual-brain con el comando /actua [segundos], ARAFURA emplea dos modelos a la vez – LLaVA y DeepSeek – para observar y razonar conjuntamente durante ese lapso[23]). Cada modelo devuelve su salida al orquestador. Por diseño, ARAFURA encapsula las diferentes capacidades cognitivas en roles/modelos separados, en lugar de usar un único modelo para todo, lo que aporta flexibilidad[13]. Este diseño por roles cognitivos está ilustrado en el diagrama de arquitectura del README, donde el orquestador envía consultas de Chat, Visión, Reflexión o Lógica a distintos motores[13].
+6. 
+    Síntesis de Respuesta: El orquestador toma las salidas de los modelos y construye la respuesta final. Si la interacción fue conversacional, formateará un mensaje de texto para el usuario. Si además hubo acciones sugeridas (por ejemplo el modelo visual indicó “Encontré un botón ‘Comprar’ y creo que debo hacer clic”), el orquestador puede adjuntar la acción en la respuesta o ejecutarla directamente según el modo. En ARAFURA, es común que las acciones aparezcan explícitamente en las respuestas entre dobles corchetes [[ACTION: …]][17], permitiendo que el usuario vea qué intenta hacer el agente antes (o mientras) lo hace. Esto añade transparencia y capacidad de veto si algo luce incorrecto.
+
+    En modos totalmente autónomos (como Gamer), es posible que ARAFURA ejecute las acciones sin esperar confirmación, dado que ese modo implica “juego rápido”. No obstante, el usuario siempre tiene comandos para pausar o detener la autonomía (/actua stop por ejemplo)[23].
+1. 
+    Presentación al Usuario: Finalmente, la respuesta compuesta se envía de vuelta a la interfaz correspondiente. En la web UI, el usuario verá en el chat el mensaje de ARAFURA, y en su caso, el panel visual actualizado y anotaciones de las acciones realizadas. En la CLI, verá el texto devuelto, con posibles indicaciones de acciones. En ambos casos, gracias al log persistente, puede haber un registro scroll-back de lo conversado, decisiones tomadas y comandos ejecutados.
+
+    En resumen, el flujo de datos de ARAFURA abarca un ciclo percepción ? deliberación ? acción, muy parecido al de un humano operando un computador. De hecho, ARAFURA opera “como persona” sobre el sistema, en sintonía con la filosofía de Google DeepMind SIMA: “mirar” la pantalla y usar teclado/ratón virtuales para interactuar, sin APIs ocultas ni acceso privilegiado al estado de las aplicaciones[24]. Esto significa que el agente enfrenta el mismo entorno que el usuario – una ventaja en términos de generalidad, pues cualquier tarea visible en pantalla es potencialmente realizable por ARAFURA, aunque también supone limitaciones de velocidad y precisión al depender de la visión por computadora.
+
+    
+    
+    Modelos de IA Implicados
+
+    Uno de los aspectos más interesantes de ARAFURA es su uso de múltiples modelos de inteligencia artificial especializados, integrados mediante el router cognitivo. En la versión actual (denominada ARAFURA v3.3), se emplean al menos los siguientes modelos open-source:
+
+    Mistral 7B (Chat): Es el modelo principal de diálogo o chatbot. Mistral 7B es un modelo de lenguaje grande de 7 mil millones de parámetros, relativamente liviano pero potente para su tamaño, publicado en 2023. ARAFURA lo utiliza para generar respuestas conversacionales generales a las entradas del usuario[2]. Este modelo maneja el grueso de interacción lingüística normal.
+
+    LLaVA 1.6 (Visión): Para su corteza visual, ARAFURA integra LLaVA (Large Language and Vision Assistant) versión 1.6[25]. LLaVA es un modelo entrenado para interpretar imágenes combinado con lenguaje natural, capaz de describir escenas, reconocer texto en pantalla y entender contexto visual. En ARAFURA, LLaVA recibe capturas de pantalla en tiempo real y produce descripciones de lo que aparece en ellas (por ejemplo, “Hay una ventana de Chrome abierta mostrando una gráfica de acciones con un botón rojo ‘Comprar’ al fondo”). Esto dota al agente de “vista” y entendimiento del entorno gráfico del usuario[14].
+
+    Phi-2 (Reflexión): Identificado en la arquitectura como el modelo para “Thinking” (pensamiento/reflexión)[25], Phi-2 es un modelo de lenguaje de ~2.7B parámetros desarrollado por Microsoft, conocido por su eficiencia y sorprendente capacidad a pesar del pequeño tamaño. Se entrena con foco en reasoning (razonamiento paso a paso). En ARAFURA, Phi-2 se emplea probablemente para generar cadenas de pensamiento intermedias, resumen de contexto, o planes de acción antes de formular la respuesta final. Al ser liviano, puede rápidamente producir reflexiones internas (“chain-of-thought”) que el orquestador usa sin sobrecargar el cómputo. Esto mejora la coherencia de las acciones del agente sin requerir un modelo gigante para cada pensamiento.
+
+    DeepSeek-R1 (Lógica/Resolución de Problemas): ARAFURA incluye un modelo denominado DeepSeek R1 orientado a razonamiento lógico y resolución de problemas complejos[2]. DeepSeek-R1 es una familia de modelos especializados en matemáticas, codificación y lógica, que surgen de aplicar RLHF para incentivar el razonamiento en LLMs (logró resultados comparables a GPT-4 en dominios matemáticos y de programación según reportes de 2024). Su rol en ARAFURA es aportar capacidades de deducción y pensamiento estructurado cuando la situación lo requiera. Por ejemplo, si el agente necesita resolver un cálculo, analizar código fuente o tomar una decisión estratégica basada en reglas, el orquestador puede delegar esa parte al modelo DeepSeek. Al estar diseñado para “pensar antes de responder”, DeepSeek-R1 complementa a Mistral y Phi-2 asegurando pasos lógicos robustos[26][27]. En la práctica, ARAFURA activa este modelo en ciertos modos avanzados; el comando /actua [segundos] menciona “Autonomía dual-brain – LLaVA + DeepSeek trabajando juntos”, lo que indica que en periodos críticos combina la visión con el módulo lógico para decidir acciones óptimas[23].
+
+    Estos modelos son orquestados localmente mediante Ollama, un runtime para servir modelos de lenguaje en local. La guía de instalación de ARAFURA requiere tener Ollama instalado y ejecutar ollama serve, así como descargar los modelos necesarios mediante ollama pull[28]. En concreto, se instruye obtener los modelos llamados “mistral”, “phi” y “llava”[28] (curiosamente no se menciona explícitamente descargar DeepSeek, posiblemente porque viene integrado o el nombre difiere; podría ser un descuido en la documentación, dado que la arquitectura sí lo incluye). Con Ollama, los modelos corren en la máquina del usuario (asumiendo que tiene la capacidad computacional suficiente, típicamente GPU con VRAM para los tamaños 7B, etc., o en CPU con menor velocidad). Esto refleja un compromiso fuerte por utilizar IA open-source y local, evitando dependencias de APIs propietarias.
+
+    Adicionalmente, en la génesis del proyecto ARAFURA se menciona GPT-3 de OpenAI como inspiración (en el repositorio globaldesign se etiquetó con “gpt-3”)[29], e incluso en una demostración externa se refirieron a ARAFURA como “robot by OpenAI” en el sentido de que aprovechaba modelos de OpenAI. Es probable que en versiones anteriores se haya utilizado GPT-3/GPT-4 a través de la API para diálogos. Sin embargo, la versión v3 actual ha pivotado completamente a modelos abiertos (Mistral, etc.) por filosofía de soberanía tecnológica y licencia libre (AGPL). Cabe destacar que ARAFURA 211225 es software libre AGPLv3[30], por lo que usar modelos abiertos era coherente con ese enfoque (no depender de servicios cerrados). En caso de requerir más potencia, el diseño permitiría sustituir un modelo por otro: por ejemplo, nada impide que un usuario avanzado reconfigure el router para usar Llama-2 13B en lugar de Mistral, u OpenAI GPT-4 vía API para el chat, etc., siempre y cuando adapte el código de integración. Esta flexibilidad es un punto a favor de la arquitectura modular.
+
+    Resumiendo, ARAFURA combina modelos especialistas en un enfoque multi-IAs: uno para lenguaje/chat general, otro para visión, otro para razonamiento ligero, otro para lógica profunda. Este ensamblaje le permite “ver, pensar y actuar” de forma más eficiente que si se confiara todo a un único modelo monolítico[31][14]. Es un diseño inspirado en la cognición humana (diferentes lóbulos/funciones del cerebro) y también similar a ciertos agentes autónomos académicos. La contrapartida es que coordinar varios modelos añade complejidad y la calidad final depende de la suma de sus partes (ver limitaciones más adelante).
+
+    
+    
+    Tecnologías y Herramientas Utilizadas
+
+    El proyecto ARAFURA está implementado principalmente en Python (?80% del código)[19], aprovechando su rico ecosistema de IA y automatización:
+
+    El backend emplea el framework FastAPI (Python) para levantar un servidor web de alto rendimiento que maneja peticiones REST/WebSocket. FastAPI facilita la construcción de APIs asíncronas y seguramente sirve los endpoints para el frontend web (por ejemplo, enviar un mensaje, obtener la imagen de visión actualizada, etc.).
+
+    Para el front-end web, se utilizan HTML/CSS/JavaScript (?~15% del código)[32]. Posiblemente se haya usado un micro-framework JS o simplemente scripts vanillas dada la escala. El diseño responsive e interacción probablemente están personalizados para mostrar el chat y panel visual. No se mencionan frameworks como React/Vue, así que podría ser una página HTML única con algo de JS para actualizar el DOM con nuevas frases e imágenes (ej. usando fetch o WebSockets).
+
+    Ollama: Como se indicó, es la herramienta encargada de ejecutar los modelos de lenguaje/visión localmente. Ollama proporciona un servidor donde se cargan los pesos de los modelos Mistral, LLaVA, Phi-2, etc., permitiendo que ARAFURA envíe prompts y reciba completions mediante una API local. Esto abstrae la complejidad de manejar modelos de diferentes tamaños y optimizaciones (GPU, CPU) y facilita intercambiarlos por otros compatibles con Ollama (que usa formatos como GGML/GGUF, etc.). Es una elección tecnológica estratégica para habilitar IA generativa local de forma sencilla.
+
+    Automatización de Sistema Operativo: Para implementar la funcionalidad de control de ratón, teclado y ventana, ARAFURA seguramente emplea librerías como PyAutoGUI, OpenCV, MSS o similares:
+
+    Captura de pantalla: Podría usar PIL (Pillow) o OpenCV junto con win32api/x11 para obtener imágenes de ventanas específicas. Dado que el sistema lista ventanas (/ventana muestra opciones), es factible que use enumeración de ventanas vía PyGetWindow (en Windows) o wmctrl (en Linux) para identificarlas, y luego MSS (Multi-Screen Shot) o PIL to capture.
+
+    Control de mouse/teclado: Librerías como PyAutoGUI ofrecen funciones cross-platform para mover el cursor .moveTo(x,y), hacer click .click(), escribir texto .write("hello"), o presionar teclas especiales. Alternativamente, en Windows podría usarse pywin32 y en Linux xdotool mediante llamadas de sistema. Dado que se incluyeron scripts batch (.bat) y shell (.sh) en el repositorio[32], es posible que haya pequeñas diferencias de implementación según el sistema operativo, ejecutando utilidades propias de cada entorno si PyAutoGUI no cubría todo.
+
+    OCR (Reconocimiento de texto en pantalla): Aunque LLaVA ya combina visión y lenguaje (posiblemente cubriendo OCR básico), a veces puede requerirse leer texto de la imagen (por ejemplo, para encontrar nombres de botones). No se menciona explícitamente, pero incorporar Tesseract u otro OCR sería factible. Podría ser una mejora futura, a menos que LLaVA o DeepSeek se usen también para inferir texto embebido.
+
+    Gestión de entornos virtuales: La documentación recomienda crear un virtual environment Python y usar pip install -r terminals/cli/requirements.txt[33]. Esto sugiere que las dependencias del proyecto se listan en ese archivo, probablemente incluyendo FastAPI, PyAutoGUI/OpenCV, librerías de IA como transformers o llamacpp (si no todo va vía Ollama), etc. También denota que el CLI y el core comparten el entorno Python.
+
+    Control de versiones y CI: Observamos una carpeta .circleci/ en el repositorio globaldesign, pero no se sabe si ARAFURA211225 tiene integraciones CI activas. Dado que es un proyecto personal con pocos colaboradores, quizá no hay un pipeline complejo. Aun así, la presencia de un repositorio público y la licencia AGPLv3 significan que cualquiera podría bifurcarlo y contribuir bajo las mismas reglas de copyleft.
+
+    En síntesis, ARAFURA se apoya en un stack tecnológico full-stack: Python en backend/IA, web frontend para la UI, y utilidades de automatización del OS. Todo con un fuerte enfoque en software libre y abierto (Python, modelos open source, licencias abiertas). Esto contrasta con soluciones comerciales que integran IA (las cuales suelen apoyarse en servicios cloud propietarios). La elección de tecnologías de ARAFURA empodera al usuario avanzado para inspeccionar y modificar cualquier parte del sistema, coherente con la filosofía del proyecto.
+
+    
+    
+    Fortalezas de la Plataforma ARAFURA
+
+    Multimodalidad Real (Texto+Visión+Acción): ARAFURA no es solo un chatbot; incorpora visión por computadora y capacidad de actuar en el entorno. Esta combinación le permite “no solo procesar texto, sino ver, pensar y actuar”[31]. Pocos asistentes IA open-source logran integrar de forma tan completa la percepción visual con la ejecución de acciones. Esto abre posibilidades enormes: puede operar interfaces gráficas, jugar videojuegos, automatizar tareas de ofimática, etc., algo fuera del alcance de un modelo de lenguaje puro.
+
+    Autonomía y Persistencia: El agente puede funcionar en modo continuo, tomando iniciativa propia. Gracias al bucle SIMA, ARAFURA puede vigilar un estado y responder sin esperar nuevas instrucciones[34][12]. Esta persistencia (una forma de “auto GPT” en vivo) es valiosa para monitorizar procesos, asistir al usuario proactivamente o ejecutar misiones de largo plazo. Además, con el Modo Gamer se demuestra flexibilidad para distintos ritmos de actuación (rápido/agresivo vs normal)[22]. Google DeepMind destacó que en SIMA 2 su agente puede razonar sobre objetivos y no solo seguir órdenes[35]; ARAFURA comparte esa filosofía y la implementa en código abierto.
+
+    Uso de IA Especializada (Enfoque de Comité): La plataforma aprovecha lo mejor de varios mundos al usar modelos especialistas para tareas específicas, en lugar de uno genérico para todo. Esto significa que:
+
+    La visión con LLaVA proporciona descripciones acotadas pero relevantes del entorno visual.
+
+    El modelo de chat (Mistral 7B) maneja lenguaje general eficientemente.
+
+    Modelos como DeepSeek o Phi-2 aportan un boost en tareas de lógica y reflexión difíciles. Esta arquitectura de “Roles Cognitivos”[36] es robusta: si un modelo falla o se queda corto en algún aspecto, el orquestador puede compensarlo con otro. Por ejemplo, LLaVA describe la pantalla y DeepSeek refuerza la comprensión lógica de esa descripción, de modo que juntos alcanzan una comprensión más rica. Esta sinergia mejora la creatividad y productividad del agente en proyectos multidisciplinarios (tal como se buscaba según la descripción original de ARAFURA)[37].
+
+    Operatividad Local y Privacidad: ARAFURA funciona completamente en el entorno local del usuario, con modelos ejecutándose en hardware propio vía Ollama. Esto implica que no se envían datos sensibles a servidores externos para la inferencia, protegiendo la privacidad. El usuario retiene control total sobre sus datos y puede incluso finetunear el sistema a medida. En contraste, muchos asistentes avanzados requieren conectividad a la nube (Alexa, Google Assistant, etc.). Esta independencia también significa que ARAFURA puede seguir funcionando sin Internet una vez instalados los modelos, o en entornos cerrados (intranets, sitios aislados por seguridad).
+
+    Transparencia y Registro: Cada decisión y acción de ARAFURA queda registrada en texto plano, y las acciones se presentan explícitamente antes/durante su ejecución[17][9]. Esta transparencia permite auditar el comportamiento de la IA, entender por qué hizo algo e incluso depurar problemas. Es un contraste con cajas negras cerradas donde el usuario solo ve la salida final. Aquí podemos ver las “entrañas” – por ejemplo, si el agente cometió un error, uno puede revisar el log de pensamientos y detectar qué razonamiento falló. Esta capacidad de inspección es fundamental para confiar en sistemas autónomos y mejorarlos iterativamente.
+
+    Interfaz de Usuario Dual (Web y Terminal): ARAFURA brinda una experiencia versátil: los usuarios no técnicos pueden preferir la interfaz web amigable con panel visual y botones, mientras usuarios avanzados pueden conjugarla con la CLI para un control más directo o para scripting. La CLI permite integrar ARAFURA en flujos de desarrollo (por ejemplo, llamar al agente desde scripts propios), lo cual es una funcionalidad poderosa para automatización. Pocos asistentes IA ofrecen de fábrica tanto UI gráfica como modo consola.
+
+    Flexibilidad y Extensibilidad: Gracias a su arquitectura modular, ARAFURA se puede extender en varios frentes. Su código abierto AGPL permite que terceros desarrollen nuevos módulos o integraciones. Se podría agregar, por ejemplo, un nuevo modelo al router (basta con implementar su conector), o integrar otra fuente de información (un buscador web) como herramienta. Esta flexibilidad es una ventaja comparativa: la plataforma puede adaptarse a casos de uso específicos sin reescribirla completa. Por ejemplo, para aplicar ARAFURA en medicina, uno podría conectarle un modelo biomédico especializado para que maneje términos clínicos mejor que Mistral, etc. El diseño ya prevé roles cognitivos definidos, así que añadir o reemplazar uno es relativamente directo.
+
+    Filosofía y Licencia Abierta: Aunque no es una fortaleza técnica per se, vale mencionar el valor de la filosofía del proyecto. El desarrollador en su “Manifiesto” destaca que la IA debe ser una “extensión cognitiva, no una caja negra cerrada”, enfatizando la importancia del conocimiento abierto[38]. La elección de AGPLv3 como licencia garantiza que cualquier mejora al código deberá compartirse igualmente abierta, beneficiando a la comunidad. Esto contrasta con Google SIMA (proyecto interno de investigación) donde los usuarios finales no tienen acceso al código ni posibilidad de adaptarlo. La apertura de ARAFURA atrae a entusiastas y expertos a colaborar e inspeccionar, potenciando su evolución.
+
+    En suma, ARAFURA ya brilla por su integralidad (percibe-decide-actúa), su independencia tecnológica, y un diseño inteligente inspirado en agentes de vanguardia pero puesto al alcance de todos. Es una base sólida sobre la cual construir el “asistente universal” de siguiente generación.
+
+    
+    
+    Limitaciones y Áreas de Mejora
+
+    A pesar de sus virtudes, ARAFURA enfrenta también varias limitaciones inherentes a su estado actual y a las tecnologías empleadas:
+
+    Capacidad de Modelo Limitada: Los modelos de lenguaje principales que utiliza (Mistral 7B, Phi-2 2.7B, etc.) son relativamente pequeños en comparación con los de última generación. Si bien están bien afinados, no alcanzan el desempeño de un GPT-4 o del modelo Gemini usado en SIMA 2 de Google[35]. Esto implica que:
+
+    Comprensión y Conocimiento: El conocimiento general de Mistral 7B puede ser inferior, pudiendo fallar en preguntas muy especializadas o de sentido común complejo que modelos mayores sí responden. ARAFURA podría “alucinar” respuestas incorrectas con más frecuencia o no entender instrucciones ambiguas tan bien como un modelo más grande.
+
+    Razonamiento Avanzado: DeepSeek-R1 ayuda en lógica, pero de nuevo, su versión distilada puede no resolver ciertos problemas extremadamente complejos o crear planes a muy largo plazo con la misma solvencia que un modelo enorme con entrenamiento específico. La ausencia de un modelo de decenas de miles de millones de parámetros se notará en la calidad de algunas decisiones o en la fluidez de las conversaciones bajo estrés.
+
+    Lenguaje Natural: Aunque Mistral es fuerte en español e inglés, los modelos pequeños a veces generan texto repetitivo o menos coherente en largas conversaciones. Esto podría afectar la experiencia en interacciones prolongadas.
+
+    Rendimiento y Recursos: Ejecutar múltiples modelos localmente puede ser exigente en hardware. No todos los usuarios disponen de una GPU con suficiente VRAM para cargar LLaVA o Mistral en RAM. ARAFURA, en un PC sin GPU, deberá correr en CPU, lo cual puede volverlo lento (respuestas con varios segundos de demora o más). Además, el loop de visión cada 15 segundos con análisis de pantalla es intensivo: capturar 4K, procesar por IA, etc., podría consumir bastante CPU/GPU constantemente. En Modo Gamer (loop 3s) esto se multiplica. Por lo tanto, la usabilidad está limitada a equipos potentes; en máquinas modestas la experiencia podría ser poco ágil. Contrariamente, Google SIMA ejecuta sobre infraestructura masiva con Gemini, aprovechando aceleradores – una ventaja difícil de igualar para un usuario promedio.
+
+    Complejidad de Configuración: Si bien el tutorial de instalación es claro, montar ARAFURA implica varios pasos: clonar repo, preparar entorno Python 3.10, instalar Ollama y descargar varios modelos pesados. Esto puede ser una barrera para usuarios no técnicos. La falta de un instalador “one-click” o de contenedores Docker preconfigurados significa que la adopción está limitada inicialmente a entusiastas. Un error en la configuración (por ejemplo, no tener el driver correcto, o un modelo mal nombrado en Ollama) puede impedir que funcione, y depurarlo requiere conocimiento. En contraste, asistentes comerciales simplemente se instalan como apps o ya vienen integrados. Esta fricción inicial es un área a mejorar para llegar a más público.
+
+    Ausencia de Entrenamiento Personalizado: Actualmente, ARAFURA no parece realizar fine-tuning en las experiencias del usuario ni aprendizaje incremental. Cada vez que se inicia, utiliza los mismos modelos pre-entrenados sin adaptación a las preferencias o entornos del usuario (más allá de la memoria de cada sesión). Tampoco hay un mecanismo integrado de retroalimentación humana (por ejemplo, que el usuario califique respuestas para afinar comportamiento). Google SIMA 2 destaca por aprender y mejorar con el tiempo[39], algo que ARAFURA aún no implementa automáticamente. La capacidad de self-improvement no está presente salvo que manualmente se re-entrene modelos con los logs (lo cual es posible porque se guardan, pero no trivial para el usuario promedio).
+
+    Memoria a Largo Plazo Limitada: Aunque el sistema guarda todo el historial en archivos, no hay indicios de que utilice una memoria semántica de largo plazo optimizada (por ejemplo, búsqueda en embeddings vectoriales). Esto significa que revivir información antigua relevante puede ser ineficiente o inexacto. El orquestador podría estar restringido a proveer a los modelos solo las N últimas interacciones por límite de contexto, dejando fuera conocimiento que quizás se discutió horas o días atrás. En usos prolongados, el agente podría “olvidar” detalles importantes, a menos que el usuario explícitamente los reintroduzca con el comando /leer <archivo> u similar (que permite cargar texto en la memoria de corto plazo)[40]. Implementar memorias persistentes más inteligentes sería deseable.
+
+    Carencia de Conocimiento Externo y Actualizado: ARAFURA, en su configuración actual, no se conecta a internet ni a fuentes de información externas. Sus respuestas se basan únicamente en conocimiento interno de los modelos (entrenados hasta cierta fecha) y lo que ve en la pantalla. Por tanto, no puede responder a eventos o datos recientes que no conozca, ni realizar búsquedas web en tiempo real. Esto lo pone en desventaja frente a un agente que sí pueda consultar Internet o bases de datos. Por ejemplo, si el usuario pregunta “¿Cuál es la temperatura actual en Madrid?” ARAFURA no tiene forma integrada de saberlo (salvo que el usuario tenga una app del tiempo abierta en pantalla para que la lea vía visión, lo cual es circunstancial). La integración con APIs de información o motores de búsqueda es algo no presente por ahora.
+
+    Limitaciones en Reconocimiento Visual: El uso de LLaVA le da a ARAFURA cierta comprensión visual, pero puede haber restricciones:
+
+    Precisión de OCR: Identificar texto pequeño en pantalla, nombres de menús, etc., puede fallar dependiendo de la calidad de la captura y las capacidades de LLaVA. No es un OCR dedicado, así que algunas cadenas podrían escapársele o interpretarlas mal.
+
+    Elementos no estándar: Interfaces muy novedosas o gráficos abstractos podrían no ser entendidos correctamente. LLaVA fue entrenado en conjuntos generales; puede confundir elementos UI poco comunes.
+
+    Resolución vs. Velocidad: Procesar imágenes 4K cada pocos segundos es intensivo; reducir resolución acelera pero pierde detalle. Encontrar el equilibrio es complejo. Si la ventana objetivo cambia rápido (animaciones, videos), LLaVA podría no captar cada cambio entre intervalos.
+
+    Entornos 3D complejos: ARAFURA está pensado para entornos 2D (el escritorio del PC). Si intentara usarse en un videojuego 3D (al estilo SIMA), la comprensión podría ser muy básica comparada con un agente entrenado específicamente en 3D (como SIMA con MineDojo, etc. que entrenó en 600 tareas de juegos[24]). ARAFURA no fue entrenada con demostraciones, por lo que su visión es estática, descriptiva, no orientada a objetivo de por sí.
+
+    Control de Acciones y Seguridad: Darle a una IA el control directo de mouse y teclado conlleva riesgos potenciales. ARAFURA ejecuta acciones sin confirmación explícita del usuario en ciertos modos (p. ej. en autonomía activa o modo gamer). Si bien muchas acciones serán benignas (click aquí, scroll allá), existe la posibilidad de que una instrucción malinterpretada cause un comportamiento no deseado (cerrar un programa incorrecto, hacer clic donde no debe, etc.). Actualmente no se menciona la existencia de un sistema de safety o permisos. Por ejemplo, no parece haber restricciones internas para evitar que ARAFURA escriba en un terminal de comandos y borre archivos, más allá de que el usuario no le pida algo así. Google SIMA al ser un prototipo de investigación no enfrenta usuarios finales aún, pero en un producto así sería crucial tener guardrails. Esta es un área delicada: ARAFURA confía en que el usuario maneja los modos con cautela. Sería preferible incorporar confirmaciones para acciones críticas o un sandbox virtual donde probarlas, para mitigar riesgos.
+
+    Falta de Integraciones Adicionales: Por ahora, ARAFURA se centra en la interacción con el propio entorno de escritorio. No ofrece integraciones predefinidas con otros sistemas (smartphones, dispositivos IoT, apps externas mediante APIs, etc.). Por ejemplo, no hay conectores directos a servicios como correo electrónico, domótica, mensajería, etc., fuera de lo que el agente pueda hacer simulando clicks si esas apps están abiertas. Esto limita su utilidad como asistente personal integral. Competidores comerciales o proyectos similares empiezan a añadir plugins o conectores (por ejemplo, ChatGPT con plugins, Auto-GPT con navegadores web y herramientas). ARAFURA tendría que implementarlos manualmente o esperar que la comunidad contribuya.
+
+    Interfaz Web Mejorable: Si bien funcional, la interfaz web podría ampliarse en funcionalidad. Actualmente muestra el chat y la vista de pantalla, pero carece de elementos como:
+
+    Paneles de configuración (para ajustar parámetros de los modelos, velocidad de loop, etc. desde la UI directamente).
+
+    Indicadores más gráficos (por ejemplo, porcentaje de “prosperidad” o algún metric dashboard para /status que ahora solo da texto[40]).
+
+    Controles para pausar/reanudar la autonomía con botones en lugar de comandos.
+
+    Posibilidad de subir imágenes o documentos para que el agente los analice (ahora solo lee pantalla o archivos de texto con comando /leer).
+
+    Soporte de audio (no hay, ver más abajo). Estas carencias no impiden el funcionamiento, pero hacen la UX menos amigable de lo que podría ser.
+
+    Sin Canal de Voz ni Avatares: ARAFURA en su estado actual se comunica únicamente por texto. No tiene síntesis de voz ni reconocimiento de voz integrados. Tampoco presenta un avatar animado o elemento personal en la interfaz (más allá de su nombre en el chat). En comparación, asistentes comerciales ofrecen interacción por voz fluida. La ausencia de esta modalidad en ARAFURA reduce su accesibilidad para quien quisiera usarlo manos libres o como robot conversacional más natural. Incorporar voz sería posible (existen TTS/STT open source), pero hoy no está implementado out-of-the-box.
+
+    En resumen, las limitaciones de ARAFURA se centran en la potencia de IA (modelos pequeños), rendimiento/hardware, características ausentes (voz, búsqueda, plugins) y algunos potenciales riesgos de uso autónomo. Muchas de estas áreas son oportunidades de mejora que detallaremos a continuación en las recomendaciones. Cabe destacar que, aun con limitaciones, ARAFURA logra mucho con recursos modestos, pero para “funcionar mejor que SIMA de Google” deberá ampliarse en varios frentes críticos.
+
+    
+    
+    Sugerencias de Innovación y Mejoras Propuestas
+
+    A continuación se presentan varias propuestas accionables para fortalecer la plataforma ARAFURA y llevarla más allá, aspirando a superar (o al menos equiparar) las capacidades de SIMA de Google DeepMind. Estas sugerencias se han organizado por ámbito, abordando experiencia de usuario, capacidades cognitivas, nuevas funcionalidades e integraciones externas. Se enumeran con cierta prioridad (primero las mejoras de mayor impacto general):
+
+    
+    1. Mejoras en la Experiencia de Usuario (UX/UI)
+
+    Incorporar Interacción por Voz (Entrada y Salida): Añadir un módulo de reconocimiento de voz que convierta las órdenes habladas del usuario en texto, y un módulo de síntesis de voz para que ARAFURA pueda responder hablándole al usuario. Esto haría la interacción mucho más natural y cercana a asistentes comerciales. Existen soluciones open source que podrían integrarse: por ejemplo, Vosk o Coqui AI STT para voz a texto, y Mozilla TTS o Festival para texto a voz en español. Una posible implementación es ejecutar estos módulos como procesos paralelos: el micrófono del usuario alimenta la transcripción en tiempo real a la CLI (simulando que el usuario tecleó), y las respuestas de ARAFURA se reproducen con voz automáticamente. Con esta mejora, ARAFURA pasaría de ser un agente “silencioso” a un asistente de voz pleno, algo que SIMA de Google no ofrece públicamente (SIMA se ha mostrado en contexto de juegos y chat, pero no como asistente de voz). La voz aumentaría la accesibilidad (p. ej. para personas con discapacidad visual o que prefieren hablar en vez de escribir) y permitiría usar ARAFURA mientras el usuario realiza otras tareas.
+
+    UI Web más Rica y Controles Directos: Optimizar la interfaz gráfica con elementos de control y visualización adicionales:
+
+    Incluir botones para acciones comunes: por ejemplo, activar o pausar autonomía, cambiar modo (chat/visión/gamer) sin tener que recordar comandos de texto. Esto reduce la curva de aprendizaje para nuevos usuarios.
+
+    Mostrar indicadores visuales de estado: un icono o color que indique si el Modo Visión está activo, si el Modo Gamer está en curso, o si el agente está en espera vs pensando (podría usarse una animación de “onda cerebral” ya mencionada – Neural Pulse – con un icono parpadeante cuando ARAFURA está procesando[16]).
+
+    Destacar elementos en la captura de pantalla: Cuando ARAFURA identifica un elemento importante o clickeable en la pantalla, la UI podría resaltarlo con un recuadro o flecha en el panel visual. Por ejemplo, si va a hacer [[ACTION: click 100,200]], dibujar un pequeño círculo en esas coordenadas en la imagen mostrada al usuario. Esto le daría feedback visual al usuario sobre dónde va a actuar el agente, permitiendo cancelarlo si es incorrecto. Sería una forma de explainability visual. Se puede implementar extrayendo coordenadas de la acción y usando canvas en HTML sobre la imagen.
+
+    Panel de ayuda/estado: Un panel lateral que liste brevemente los comandos disponibles (como /ayuda pero siempre visible) y quizás estadísticas en vivo (las métricas de “Equidad y Prosperidad” de /status podrían mostrarse con barras o porcentajes)[40]. Esto evitaría al usuario tener que pedir /ayuda y mejora la transparencia.
+
+    Tema Oscuro y Personalización: Añadir opciones de personalizar la apariencia (colores oscuros vs claros, tamaño de fuente, etc.) para comodidad visual. Dado que la UI es casera, esto puede hacerse con CSS alternativo y un toggle.
+
+    Multi-idioma en interfaz: Actualmente la documentación/comandos están en español. Podría internacionalizarse la interfaz para al menos ofrecer inglés, dado que los modelos también soportan ese idioma. Así la comunidad internacional podría usarla más fácilmente (manteniendo español como núcleo también).
+
+    Estas mejoras harían la interfaz más intuitiva y amistosa, reduciendo la dependencia en comandos de texto y destacando la innovación visual de ARAFURA. En comparación, SIMA de Google se demostró en entornos 3D con visualizaciones propias; ARAFURA puede sobresalir teniendo una UI elegante para el ámbito 2D/desktop.
+
+    Reducción de Fricción en la Instalación: Para atraer más usuarios y testers (lo cual a su vez acelerará mejoras), sería muy útil simplificar la instalación. Se sugieren:
+
+    Proveer un Dockerfile o contenedor con todo preconfigurado (Python + dependencias + modelos descargados). Aunque el tamaño sería grande por los modelos, para algunos es más sencillo ejecutar docker run y listo.
+
+    Crear un script de instalación automatizada (bash/PowerShell) que realice los pasos: clonar repo, crear venv, instalar reqs, descargar Ollama, descargar modelos. Actualmente esas instrucciones existen en README[41], pero un script puede ejecutarlas secuencialmente y detectar errores.
+
+    Escribir una guía de solución de problemas común (FAQ) en los docs, por si surgen errores de compatibilidad.
+
+    A futuro, incluso un instalador gráfico o paquete (e.g. un .exe para Windows que instale Python y demás) haría a ARAFURA mucho más accesible al público general, posicionándolo más cerca de un producto pulido que de un proyecto experimental.
+
+    Simplificar la instalación no hace a ARAFURA más “inteligente” que SIMA, pero sí podría lograr mayor adopción y comunidad, lo cual indirectamente le daría ventaja en desarrollo. Google SIMA por ahora es demo de laboratorio; ARAFURA podría ganar usuarios reales si es fácil de probar, obteniendo feedback valioso y tal vez contribuciones open-source.
+
+    
+    
+    2. Ampliación de Capacidades de Respuesta e Inteligencia
+
+    Integrar Modelos de Mayor Tamaño (opcionalmente): Ofrecer compatibilidad para usar modelos de lenguaje más potentes cuando el hardware o acceso cloud lo permitan. Por ejemplo, permitir configurar ARAFURA para usar Llama 2 de 70B (quizá cuantizado) en lugar de Mistral 7B para el chat, o integrar Claude 2 / GPT-4 via API si el usuario tiene clave y prefiere mayor inteligencia. Esto se alinea con la modularidad: el router podría tener una opción “use best available model”. Ya que ARAFURA es local-first, se puede hacer opcional (no forzar dependencias externas), pero tener la opción de plugin de modelos privativos puede servir en casos donde se necesite rendimiento máximo puntual. Un ejemplo concreto: usar GPT-4 en el rol de “DeepSeek” cuando se requiera lógica compleja fuera del alcance del modelo local (p. ej. razonamiento legal complicado). Desde la perspectiva de superar a SIMA, dotar a ARAFURA de la capacidad de escalar su “cerebro” según disponibilidad le daría ventaja: SIMA 2 usa Gemini internamente[42], pero un usuario externo no puede alterar eso; en cambio en ARAFURA, un power-user podría enchufarle el modelo SOTA que quiera. Para implementar, se podría:
+
+    Estandarizar las interfaces del router (e.g. expecting a local endpoint or API endpoint).
+
+    Documentar cómo añadir nuevos modelos.
+
+    Incluir en config plantillas para modelos populares (ej: “use_openai”: True/False con clave API). Así, ARAFURA se vuelve agnóstica al modelo: hoy corre con Mistral/DeepSeek, mañana podría correr con GPT-5 si disponible, permaneciendo la lógica intacta. Esta adaptabilidad la podría mantener mejor actualizada que SIMA a largo plazo.
+
+    Mejorar la Memoria y Contexto: Implementar un sistema de memoria de largo plazo con embeddings para que ARAFURA pueda recordar información importante a lo largo del tiempo sin sobrecargar el prompt de los modelos. Esto se lograría extrayendo representaciones vectoriales (por ejemplo, usando Sentence Transformers u OpenAI embeddings) de cada interacción o de resúmenes periódicos, y almacenándolas en una base de datos vectorial (Milvus, FAISS, etc.). Ante una nueva consulta, el orquestador podría buscar en ese espacio vectorial los recuerdos más relevantes y proporcionarlos al modelo de lenguaje como contexto adicional (“recall”). Por ejemplo, si hace tres días se configuró una preferencia (“no me gusta el modo oscuro”), y hoy el usuario dice “hazlo como te pedí”, ARAFURA podría recordar esa preferencia buscando en la memoria vectorial. Esto otorgaría una persistencia cognitiva superior, acercándola a un asistente personalizado. Es importante también resumir periódicamente los logs para evitar crecimiento infinito – se podría usar el modelo phi-2 para generar sumarios diarios almacenados. SIMA 2 ya muestra cierto self-reflection y mejora continua[39]; con una memoria mejor, ARAFURA podría argumentarse que aprende del usuario en cierto modo. Esta mejora la haría “más lista con el tiempo”, un diferenciador clave.
+
+    Incorporar Explicabilidad y Meta-Razonamiento: Una ventaja que SIMA 2 demostró es poder describir sus intenciones y detallar sus pasos al usuario[43]. Sería muy beneficioso que ARAFURA adoptara esta práctica de transparencia activa. Dos acciones concretas:
+
+    Auto-explicación de Plan: Antes de ejecutar un plan complejo, ARAFURA podría en lenguaje natural decirle al usuario qué pretende hacer. Podría usar un modelo (o prompt en el mismo modelo) para reformular su chain-of-thought interna en una breve explicación comprensible. Por ejemplo: “Voy a intentar cerrar las ventanas emergentes que veo y luego hacer clic en el botón Comprar, porque detecté una señal de riesgo en la gráfica.” Esto, mostrado en el chat, alinea al usuario y agente, permitiendo intervención si la intención es equivocada. Parte de esto ya se esboza en SIMA 2 (donde el agente “razona sobre su propio comportamiento y lo comunica”[44]). Implementarlo en ARAFURA consolidaría la confianza del usuario y reduce sorpresas.
+
+    Consulta de Aprobación para acciones críticas: Para mejorar la seguridad, ARAFURA podría, ante ciertas acciones potencialmente riesgosas (por ejemplo, cerrar un programa sin guardar, borrar un archivo, gastar dinero), pedir confirmación explícita. Esto se puede lograr definiendo una lista de palabras clave/acciones que disparen un subflujo: el agente describiría la acción y preguntaría “¿Seguro que deseas proceder?”. Solo ejecutaría tras un “sí” del usuario. Aunque enlentece la autonomía, es un balance hacia la seguridad. Quizá como modo alternativo: en “modo seguro”, siempre pide confirmación; en “modo libre”, actúa directo. Tener esta característica sería un selling point frente a agentes autónomos que pueden ser impredecibles.
+
+    Aprendizaje por Refuerzo con Feedback Humano (RLHF) local: En línea con mejora continua, se podría pensar en un sistema ligero para refinar las respuestas de ARAFURA a partir de feedback del usuario. Por ejemplo, si ARAFURA da una respuesta errónea, el usuario podría marcarla o corregirla, y el sistema debería de algún modo ajustar sus modelos o al menos recordar la corrección. Un enfoque práctico es almacenar pares de preguntas/malas respuestas/buenas respuestas y luego permitir al usuario lanzar un proceso offline de fine-tuning incremental de Mistral con esos ejemplos. Aunque complejo, herramientas como LoRA fine-tuning podrían usarse con unos pocos ejemplos para sesgar el modelo a las preferencias del usuario. Esto podría estar fuera del alcance inmediato (por recursos), pero incluso sin reentrenar, el agente podría aprender mediante instrucciones en su prompt de sistema (por ejemplo, agregando “Recuerda no usar lenguaje informal” si el usuario lo corrigió antes). Es decir, incorporar instrucciones persistentes de usuario (p.ej. un perfil con normas y preferencias) que siempre se incluyan en el contexto inicial. Así la IA se personaliza. SIMA 2 aprendió de cientos de demos con humanos[24]; ARAFURA podría aprender de su usuario concreto, haciéndolo más adaptado que el agente genérico de Google.
+
+    Especialización con Modelos de Código o Herramientas de Pensamiento: Actualmente no hay un modelo dedicado a programación, pero dado que ARAFURA puede interactuar con un entorno de desarrollo (por visión, abriendo un IDE), beneficiaría integrar un modelo de código (como CodeLlama 7B/13B o StarCoder). Esto permitiría que ARAFURA escriba, depure o refactorice código fuente con mayor habilidad que Mistral genérico. Podría añadirse al router una rama “Codificación” que detecte cuando el usuario pregunta algo técnico (o si la ventana activa es un editor de código) y entonces usar el modelo de código. Esto le daría una ventaja sobre SIMA en ámbitos de programación o automatización de desarrollo, convirtiendo a ARAFURA en un potencial asistente de programación autónomo (imagine abrir Visual Studio Code y pedirle a ARAFURA que implemente una función; con visión podría hacerlo). Lo mismo aplica a otras especialidades: por modularidad, se podrían montar modelos de dominio específico: uno de lenguaje jurídico para trámites, uno de medicina para consultas de salud, etc., y enrutar según contexto. Este nivel de especialización es algo que un solo agente generalista (SIMA) no lograría sin enorme entrenamiento; ARAFURA podría orquestar varios expertos y superar a un único modelo en calidad en cada nicho.
+
+    
+    
+    3. Nuevas Funcionalidades y Extensión de Alcance
+
+    Integración de Búsqueda Web y Conocimiento en Tiempo Real: Para solventar la falta de información actualizada, se recomienda dotar a ARAFURA de la capacidad de buscar en Internet cuando enfrente preguntas de conocimiento general o necesite datos recientes. Esto se puede lograr incorporando un módulo tipo “herramienta de búsqueda”: el agente formula una consulta (texto) y a través de una API o un navegador controlado obtiene resultados que luego analiza. Con su capacidad de controlar una ventana, una opción sencilla es que abra un navegador web y use un buscador, leyendo la pantalla con visión (lo cual sería ingenioso pero propenso a errores OCR). Más robusto sería usar directamente la API de algún motor (Google Search API, Wiki API) y traer textos que luego entregue a DeepSeek o Mistral para extraer la respuesta. Esta funcionalidad convertiría a ARAFURA en un verdadero asistente conectado al mundo, no limitado por su entrenamiento. Por ejemplo, ante “¿qué dijo el presidente hoy?”, podría buscar noticias. Esto la pondría en competencia más directa con ChatGPT+Bing. Superaría a SIMA en el sentido de no solo desenvolverse en entornos cerrados, sino estar informada. Habría que tener cuidado de filtrar bien la información para no introducir texto malicioso en el prompt, pero con controles razonables se puede hacer. Desde la perspectiva de implementación, se podría añadir un nuevo comando o simplemente que el orquestador detecte ciertas consultas y llame a una función de búsqueda. Incluso podría pedirse permiso al usuario antes de acceder a internet, por privacidad.
+
+    Plugins y Herramientas de Usuario: Extender ARAFURA con un sistema de plugins que permitan integrarse con aplicaciones y servicios populares:
+
+    Por ejemplo, un plugin para correo electrónico: de modo que ARAFURA pueda leer el correo entrante (con permiso) y resumirlo, o redactar respuestas. Esto podría hacerse controlando el cliente web de correo via visión+acción, pero sería más confiable usar la API (IMAP/SMTP) mediante un módulo Python. Un plugin podría gestionar eso y presentarlo al orquestador como otra fuente de datos/herramientas.
+
+    Plugins para aplicaciones específicas: por ejemplo, integración con Spotify (para buscar música), con calendario de Google (para crear eventos), con archivos locales (para buscar documentos en el disco por contenido). Cada plugin expondría algunas funciones que el agente puede llamar. Se podría inspirar en el sistema de OpenAI Function Calling o los ChatGPT Plugins.
+
+    Un plugin de cálculo: aunque DeepSeek maneja matemática en texto, a veces es mejor invocar directamente Python para cálculos exactos o ejecutar código. Un plugin que evalúe expresiones matemáticas o código Python que el agente produzca le otorgaría capacidad de fidelidad al 100% en cálculos. Por ejemplo, ante “¿Cuál es la 25ava prime?” en lugar de arriesgar error, el agente podría generar código Python para calcularlo y obtener la respuesta por ejecución real.
+
+    Plugin de cámara o sensores físicos: Si se quisiera expandir ARAFURA a mundo físico, un plugin podría pasarle imágenes de una cámara web para que use su modelo visual más allá de la pantalla (convirtiéndolo en un robot doméstico básico). O conectarlo a sensores IoT y que los lea.
+
+    Diseñar un sistema de plugins estructurado (por ejemplo, basado en archivos JSON de especificación, similar al de OpenAI) haría la plataforma sumamente extensible. La comunidad podría desarrollar sus propios complementos. Esto pondría a ARAFURA en ventaja porque ningún agente de su clase tiene eso de forma abierta actualmente (AutoGPT tiene “plugins” pero la configuración es manual y menos enfocada en UI integradas). Con plugins, ARAFURA puede volverse el “pegamento” entre el usuario y todas sus herramientas digitales, superando a SIMA que se centra en entornos simulados.
+
+    Capacidades de Robot Física / 3D: Un paso más allá, pensando en comparación con SIMA (que apunta a AGI en entornos virtuales y robótica[45]), sería interesante pilotar a ARAFURA hacia la embodiment físico. Por ejemplo, integrarlo con un brazo robótico o un robot móvil sencillo. Su arquitectura de visión y acción ya tiene mucho de lo necesario – se le podrían proporcionar “ojos” (cámara) y “manos” (controladores de robot). Esto obviamente requiere hardware, pero conceptualmente se alinea con su objetivo de ser un agente versátil. Un caso más inmediato podría ser integrarlo con plataformas 3D virtuales (tipo Unity, Unreal) donde pudiera actuar como NPC inteligente. Así se podría demostrar que ARAFURA no solo opera escritorios 2D, sino también mundos 3D (trasladando su visión a la cámara del juego y sus acciones a comandos de jugador virtual). Esto competiría directamente con SIMA 2, mostrando que una plataforma open-source también puede incursionar en juegos y robótica. Es una sugerencia ambiciosa y de largo plazo, pero que pondría a ARAFURA en la conversación de AGI embodied.
+
+    Optimización del Bucle de Autonomía con Aprendizaje: Actualmente el loop autónomo busca “señales de prosperidad o riesgo” según criterios fijos[46]. Se podría aplicar aprendizaje automático para que el agente mejore su detección de situaciones. Por ejemplo, usando técnicas de reinforcement learning clásico: definir una métrica de “éxito” en una tarea y permitir que ARAFURA ajuste sus acciones para maximizarlo. Si está jugando un juego, la puntuación puede ser la recompensa; si haciendo trading, las ganancias. Entonces el agente podría ajustar su frecuencia de acciones o qué elementos clicar aprendiendo de episodios pasados. Esto haría la autonomía más eficaz con el tiempo. Implementarlo requiere delimitar bien la tarea y métricas, pero podría hacerse en entornos simulados primero (como curvita de entrenamiento). Sería una funcionalidad en que ARAFURA superaría a SIMA en ciertos dominios si consigue optimizarse más allá de instrucciones hard-coded. También podría exponer al usuario la posibilidad de definir “objetivos” para la autonomía (ej: en Modo Gamer decirle qué optimizar: matar enemigos vs sobrevivir, etc.).
+
+    
+    
+    4. Integración con Otros Sistemas y Herramientas
+
+    Soporte Multiplataforma Mejorado (Móvil, Web, Cloud): Actualmente ARAFURA corre en desktop (Windows/Linux). Para ampliar su alcance, sería interesante:
+
+    Crear un cliente móvil (app Android/iOS) que se comunique con ARAFURA corriendo en un servidor casero. De este modo, el usuario podría hablarle a ARAFURA por el teléfono y ARAFURA ejecutar acciones en su PC de forma remota. Esto habilita casos de uso como: “Estoy fuera de casa, le pido por móvil a ARAFURA que me envíe tal archivo de mi PC” y el agente lo hace.
+
+    Alternativamente, permitir desplegar ARAFURA en un servidor cloud/VPS (sin la parte de visión, o con visión virtual) para que se acceda via web segura desde cualquier lugar. Esto haría de ARAFURA un asistente nube personal al estilo Jarvis.
+
+    Incluso pensar en integraciones con asistentes existentes: por ejemplo un skill de Alexa o Google Assistant que reenvíe comandos a ARAFURA local para tareas que los asistentes comerciales no hacen (como operar la PC).
+
+    O un plugin de navegador (Chrome/Firefox) para mandar páginas web a ARAFURA y que las lea/resuma con su visión o las procese de alguna forma.
+
+    La meta es insertar ARAFURA en el ecosistema digital cotidiano del usuario, no solo en el PC aislado. Así su utilidad y presencia se multiplica. Si logramos que ARAFURA se “lleve en el bolsillo” (vía móvil) u opere en segundo plano en todos lados, se convertiría en algo más ubicuo que SIMA (que corre en entornos controlados de investigación). Esto requerirá enfocarse en seguridad y autenticar conexiones, pero es factible.
+
+    Integración con Suites de Productividad (Office, etc.): Un camino concreto de mejora es hacer que ARAFURA trabaje mejor con herramientas de oficina: editar documentos Word, organizar Excel, crear presentaciones. Esto se puede lograr mediante automatizaciones específicas o APIs: por ejemplo, usando la API de Office 365 si disponible, o controlando la versión web de Google Docs con visión. Tener “agentes” especializados en esas tareas (un poco al estilo de AutoGPT plugins) haría que usuarios de negocio encuentren en ARAFURA un aliado único. Podría uno pedir: “Arafura, genera un resumen de este PDF y envíalo por email a Juan” – y el agente usando visión lee el PDF, compone el resumen y a través de un plugin de correo lo envía. Esa orquestación multi-app es el tipo de caso de uso que haría a ARAFURA destacar muy por encima de lo que SIMA propone (SIMA 2 se enfoca en gaming; ARAFURA podría brillar en productividad y multitarea real) convirtiéndose en un asistente ejecutivo virtual.
+
+    Integración con Herramientas de Desarrollo Colaborativo: Dado que el creador mostró interés en IMVU, impresión 3D, etc., ARAFURA podría integrarse con plataformas creativas: por ejemplo, un plugin para Github (que le permita abrir repos, analizar código y proponer cambios), o para herramientas de modelado 3D/CAD (donde mediante visión entienda un modelo y reciba órdenes para modificarlo). Estas integraciones de nicho podrían atraer comunidades específicas (desarrolladores, diseñadores) a usar ARAFURA como co-piloto. Por ejemplo, imaginar a ARAFURA manejando Blender: “Arafura, en esta escena 3D, agrega una luz azul tenue en la esquina” y que lo haga via su visual cortex identificando la interfaz de Blender. Sería impresionante. La prioridad de esta sugerencia es menor comparada con otras, pero muestra cómo se puede sobrepasar límites pensados: Google DeepMind con SIMA busca AGI general, pero tal vez la superioridad de ARAFURA venga de ser extremadamente útil en tareas concretas del día a día y la creación digital.
+
+    
+    
+    5. Otras Recomendaciones Técnicas
+
+    Optimización de Performance: A la par de añadir funciones, conviene optimizar lo existente. Por ejemplo, ajustar la frecuencia de captura de pantalla dinámicamente (si no hay muchos cambios en pantalla, reducir FPS para ahorrar CPU, pero si detecta movimiento, subirlo). O usar técnicas de region of interest para no procesar toda la imagen 4K siempre sino solo zonas relevantes. También cargar modelos en media precisión o usar cuantización 4-bit (ya que Ollama seguramente lo hace, pero revisarlo) para acelerar inferencia. Otra idea: si la máquina tiene varias GPUs o CPU multi-core, correr los modelos en paralelo (que LLaVA procese imagen mientras Mistral prepara la respuesta anterior, etc.). Estas mejoras disminuirían la latencia y dan sensación de un sistema más ágil, más cercano a tiempo real. Un agente que responde y actúa con rapidez aparenta más inteligencia que uno que se toma 10-15 segundos en cada paso.
+
+    Seguridad y Privacidad Adicional: Si ARAFURA va a manejar acciones críticas o datos personales, se podría incorporar:
+
+    Mecanismos de encriptación de los logs o información sensible (por si alguien accede al PC ajeno no pueda leer conversaciones privadas).
+
+    Posibilidad de modo "solo lectura" donde el agente solo observa y aconseja pero no ejecuta acciones, para usuarios que quieran cero riesgo (similar a tener un “copiloto” que te dice qué hacer y tú manualmente lo haces, útil en entornos donde no se confía del todo todavía).
+
+    Filtros de contenido para evitar que si la IA malinterpreta algo no ejecute comandos destructivos (p.ej. si un mensaje malicioso le dice "escribe rm -rf /", el sistema lo bloquee). Esto se puede implementar con listas negras simples de comandos de terminal en las acciones.
+
+    Comunidad y Colaboración: Fomentar que más desarrolladores se sumen mejorando documentación técnica (diagramas de arquitectura más detallados, explicación del código en los archivos README de cada módulo). Quizá crear pequeños desafíos o issues para que la comunidad contribuya (por ejemplo, “Integrar tal modelo visionario” o “Crear plugin de X”). Esto no mejora la plataforma inmediatamente, pero en el mediano plazo acelerará innovaciones. Un proyecto open-source supera a investigación propietaria cuando hay masa crítica de colaboradores. Si ARAFURA se abre camino y gana tracción, podría superar a SIMA simplemente por la velocidad de experimentación comunitaria.
+
+    En conclusión, las sugerencias prioritarias se centran en: (a) elevar la inteligencia del agente (mejores modelos, memoria, herramientas), (b) enriquecer la interacción (voz, UI intuitiva, explicaciones), (c) ampliar su alcance funcional (plugins, integraciones, usos móviles), y (d) asegurar la confiabilidad (optimización, seguridad). Implementando progresivamente estas recomendaciones, ARAFURA podría transformarse en un asistente multiplataforma más capaz que cualquier ofrecido actualmente, superando incluso la propuesta de SIMA de Google en varios aspectos prácticos.
+
+    SIMA 2 de Google DeepMind ha demostrado lo que un agente con un modelo gigante puede lograr en juegos 3D, pero ARAFURA tiene la oportunidad de ir más allá en utilidad cotidiana, gracias a su apertura y versatilidad. Con las mejoras sugeridas, ARAFURA podría funcionar mejor que SIMA al ser: igualmente autónoma pero más personalizable, igualmente razonadora pero disponible para tareas reales diarias, y todo ello sin las cajas negras de por medio[24][35]. En definitiva, fortalecer ARAFURA según estas líneas no solo la haría más potente técnicamente, sino también más valiosa para los usuarios, que es el criterio último donde se mide el éxito de una plataforma de inteligencia artificial.
+
+    Fuentes consultadas: ARAFURA211225 – Documentación y código del repositorio (arquitectura, README y archivos relacionados)[13][17]; Blog de Google DeepMind sobre SIMA 2 (detalles de capacidades de SIMA)[24][42]; Recursos sobre modelos DeepSeek-R1 y Phi-2[26][47]. Todas las recomendaciones aquí propuestas derivan del análisis técnico comparativo entre la plataforma ARAFURA y el estado del arte en agentes cognitivos autónomos, buscando impulsar a ARAFURA hacia un nuevo nivel de desempeño.
+
+    
+    
+    
+    
+    
+
+    
+    [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15] [16] [17] [18] [19] [20] [21] [22] [23] [25] [28] [30] [31] [32] [33] [34] [36] [38] [40] [41] [46] GitHub - davidjfont/ARAFURA211225
+
+    https://github.com/davidjfont/ARAFURA211225
+
+    [24] [35] [39] [42] [43] [44] [45]  SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind 
+
+    https://deepmind.google/blog/sima-2-an-agent-that-plays-reasons-and-learns-with-you-in-virtual-3d-worlds/
+
+    [26] Understanding DeepSeek R1—A Reinforcement Learning-Driven ...
+
+    https://kili-technology.com/blog/understanding-deepseek-r1
+
+    [27] How was DeepSeek-R1 built; For dummies : r/LLMDevs - Reddit
+
+    https://www.reddit.com/r/LLMDevs/comments/1ibhpqw/how_was_deepseekr1_built_for_dummies/
+
+    [29] GitHub - davidjfont/globaldesign: Learn and get inspired. Everything is posible.
+
+    https://github.com/davidjfont/globaldesign
+
+    [37] davidjfont (davidjfont) / Repositories · GitHub
+
+    https://github.com/davidjfont?tab=repositories
+
+    [47] Phi-2: The surprising power of small language models - Microsoft
+
+    https://www.microsoft.com/en-us/research/blog/phi-2-the-surprising-power-of-small-language-models/
+
+    
+    
+  Citas
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+subgraph "Frontal Cortex" Orchestrator -->|Manage| Memory[Memory Manager (JSONL)] Orchestrator -->|Control| Autonomy[SIMA Loop (Autonomy)] end
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Orchestrator --> Router{Model Router} Router -->|Chat| Mistral[Mistral 7B (Chat)] Router -->|Vision| Llava[Llava 1.6 (Vision)] Router -->|Thinking| Phi[Phi-2 (Reflexion)] Router -->|Reasoning| DeepSeek[DeepSeek R1 (Logic)] end
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+graph TD User([Usuario]) <--> WebUI[Web Interface (Glass)] User <--> CLI[Terminal CLI]
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+User <--> CLI[Terminal CLI]
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+real (4K resolution context). * Orquestador Autónomo (SIMA): Un bucle de vida que observa, decide y actúa sin esperar órdenes. * Interfaz Híbrida: Una UI Web moderna "Glassmorphism" conectada a un cerebro terminal robusto.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+ARAFURA implementa el paradigma SIMA (Scalable Instructable Multiworld Agent).
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+* Cortex Visual (Llava): Capacidad de ver e interpretar pantallas en tiempo real (4K resolution context). * Orquestador Autónomo (SIMA): Un bucle de vida que observa, decide y actúa sin esperar órdenes.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+subgraph "Frontal Cortex" Orchestrator -->|Manage| Memory[Memory Manager (JSONL)] Orchestrator -->|Control| Autonomy[SIMA Loop (Autonomy)] end
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Toda interacción (Chat, Visión, Pensamientos) se guarda permanentemente en: `sessions/session_YYYY-MM-DD.jsonl`
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+3. Autonomía (SIMA Loop)
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+[[ACTION: click X, Y]] # Click en coordenadas [[ACTION: doubleclick X, Y]] # Doble click [[ACTION: type TEXTO]] # Escribe texto [[ACTION: key TECLA]] # Presiona tecla (enter, space, up, down, left, right, tab, esc) [[ACTION: hotkey ctrl c]] # Combinación de teclas (ctrl+c, shift+space, alt+tab) [[ACTION: scroll up]] # Scroll arriba (también: down, o número como 500)
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+En modo visión, ARAFURA entra en un bucle autónomo:
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+subgraph "Neural Pathways (Router)" Orchestrator --> Router{Model Router} Router -->|Chat| Mistral[Mistral 7B (Chat)] Router -->|Vision| Llava[Llava 1.6 (Vision)] Router -->|Thinking| Phi[Phi-2 (Reflexion)] Router -->|Reasoning| DeepSeek[DeepSeek R1 (Logic)] end
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+ARAFURA ha evolucionado de un sistema narrativo a una Entidad Cognitiva Multimodal. Ya no es solo texto; ahora posee:
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+* Cortex Visual (Llava): Capacidad de ver e interpretar pantallas en tiempo real (4K resolution context). * Orquestador Autónomo (SIMA): Un bucle de vida que observa, decide y actúa sin esperar órdenes. * Interfaz Híbrida: Una UI Web moderna "Glassmorphism" conectada a un cerebro terminal robusto.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+2. Live Feed & Neural Pulse
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Estas acciones son ejecutadas por el agente visual o pueden incluirse en respuestas del modelo:
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Herramientas de Visión
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Languages
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Modos de Operación
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+`/mode chat` Modo CHAT - Conversación textual estándar. `/mode vision` Modo VISIÓN - Captura y análisis de pantalla. `/gamer` MODO GAMER - Jugadora competitiva agresiva. Loop 3s, detección de botones, tracking de puntuaciones. `/actua [segundos]` AUTONOMÍA DUAL-BRAIN - LLaVA ? + DeepSeek trabajando juntos.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Cuando `/gamer` está activo, ARAFURA se transforma en una jugadora competitiva:
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+`/gamer` MODO GAMER - Jugadora competitiva agresiva. Loop 3s, detección de botones, tracking de puntuaciones. `/actua [segundos]` AUTONOMÍA DUAL-BRAIN - LLaVA ? + DeepSeek trabajando juntos.
+
+deepmind.google
+SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind
+The Power of Reasoning
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Orchestrator --> Router{Model Router} Router -->|Chat| Mistral[Mistral 7B (Chat)] Router -->|Vision| Llava[Llava 1.6 (Vision)] Router -->|Thinking| Phi[Phi-2 (Reflexion)]
+
+kili-technology.com
+Understanding DeepSeek R1—A Reinforcement Learning-Driven ...
+Understanding DeepSeek R1—A Reinforcement Learning-Driven ... DeepSeek R1 employs rule-based reward models to reinforce accuracy in math and coding tasks. Unlike human-labeled datasets, these reward models ...
+
+reddit.com
+How was DeepSeek-R1 built; For dummies : r/LLMDevs - Reddit
+How was DeepSeek-R1 built; For dummies : r/LLMDevs - Reddit DeepSeek-R1 is an advanced AI model, like ChatGPT, designed to understand and generate human-like text. What makes it special is the way it was ...
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+* Python 3.10+ * Ollama instalado y corriendo (`ollama serve`). * Modelos necesarios: `ollama pull mistral`, `ollama pull phi`, `ollama pull llava`.
+
+github.com
+GitHub - davidjfont/globaldesign: Learn and get inspired. Everything is posible.
+ecommerce 80 3dprint 82 gpt-3
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+License
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+? ARAFURA ? ? Cognición Visual × Autonomía × Persistencia ? ? ? ? "I don't just process text. I see, I think, I act." ? ?????????????????????????????????????????????????????????????????
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Languages
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+# 2. Entorno Virtual python -m venv venv .\v env\S cripts\a ctivate
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+real (4K resolution context). * Orquestador Autónomo (SIMA): Un bucle de vida que observa, decide y actúa sin esperar órdenes. * Interfaz Híbrida: Una UI Web moderna "Glassmorphism" conectada a un cerebro terminal robusto.
+
+deepmind.google
+SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind
+Today we’re introducing SIMA 2, the next milestone in our research creating general and helpful AI agents. By integrating the advanced capabilities of our Gemini models, SIMA is evolving from an instruction-follower into an interactive gaming companion. Not only can SIMA 2 follow human-language instructions in virtual worlds, it can now also think about its goals, converse with users, and improve itself over time.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+El sistema utiliza una arquitectura modular basada en Roles Cognitivos:
+
+github.com
+davidjfont (davidjfont) / Repositories · GitHub
+* ### ARAFURA Public
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Licencia & Filosofía
+
+deepmind.google
+SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind
+Gemini models, SIMA is evolving from an instruction-follower into an interactive gaming companion. Not only can SIMA 2 follow human-language instructions in virtual worlds, it can now also think about its goals, converse with users, and improve itself over time.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Comando Función `/status` Muestra métricas de Equidad y Prosperidad. `/leer <archivo>` Carga un archivo de texto en la memoria de corto plazo. `/ayuda` o `/help` Muestra ayuda de comandos. `/salir` o `salir` Detiene el bucle autónomo y cierra el sistema.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+Instalación
+
+deepmind.google
+SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind
+SIMA 2’s new architecture integrates Gemini’s powerful reasoning abilities to help it understand a user’s high-level goal, perform complex reasoning in pursuit, and skillfully execute goal-oriented actions within games.
+
+deepmind.google
+SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind
+We trained SIMA 2 using a mixture of human demonstration videos with language labels as well as Gemini-generated labels. As a result, SIMA 2 can now describe to the user what it intends to do and detail the steps it's taking to accomplish its goals.
+
+deepmind.google
+SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind
+pause
+
+deepmind.google
+SIMA 2: A Gemini-Powered AI Agent for 3D Virtual Worlds - Google DeepMind
+This is a significant step in the direction of Artificial General Intelligence (AGI), with important implications for the future of robotics and AI-embodiment in general.
+
+github.com
+GitHub - davidjfont/ARAFURA211225
+1. Observa: Captura la pantalla. 2. Evalúa: Busca señales de prosperidad o riesgo. 3. Actúa: Si está autorizado, ejecuta acciones (`[[ACTION: click...]]`).
+
+microsoft.com
+Phi-2: The surprising power of small language models - Microsoft
+Phi-2: The surprising power of small language models - Microsoft On complex benchmarks Phi-2 matches or outperforms models up to 25x larger, thanks to new innovations in model scaling and training data ...
+Todas las fuentes
+

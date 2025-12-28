@@ -14,7 +14,7 @@
         <aside class="sidebar">
             <div class="brand">
                 <h1>ARAFURA</h1>
-                <span class="subtitle">CORE SYSTEM v3</span>
+                <span class="subtitle">CORE SYSTEM v5.1</span>
             </div>
 
             <div class="status-card">
@@ -35,10 +35,38 @@
                 </div>
             </div>
 
+            <div class="status-card">
+                <h3>NUCLEUS HEALTH</h3>
+                <div class="metric">
+                    <span>Neural Load</span>
+                    <div class="bar-bg">
+                        <div class="bar-fill" id="bar-load" style="width: 20%;"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <span>Aether Sync</span>
+                    <span class="value" id="val-sync" style="color: var(--success);">ESTABLE</span>
+                </div>
+                <div class="metric">
+                    <span>Memory Trace</span>
+                    <span class="value" id="val-mtrace" style="color: var(--accent);">#A7F0..</span>
+                </div>
+            </div>
+
+            <div class="tactical-panel">
+                <h3>TACTICAL CONTROLS</h3>
+                <div class="button-grid">
+                    <button class="t-btn" id="btn-mode-vision" title="Alternar Visión">👁️</button>
+                    <button class="t-btn" id="btn-mode-auto" title="Iniciar Autonomía">🤖</button>
+                    <button class="t-btn" id="btn-mode-gamer" title="Modo Gamer">🎮</button>
+                    <button class="t-btn" id="btn-mode-stop" title="STOP Emergencia"
+                        style="background: #f44;">🛑</button>
+                </div>
+            </div>
+
             <div class="mode-selector">
                 <h3>ACTIVE MODE</h3>
                 <div class="mode-badge" id="current-mode">CHAT</div>
-                <small>Use <code>/mode vision</code> to switch</small>
             </div>
 
             <div style="margin-top: auto; padding: 15px 0; border-top: 1px solid #333; text-align: center;">
@@ -73,9 +101,17 @@
         <!-- RIGHT PANEL (VISION/THOUGHTS) -->
         <aside class="info-panel">
             <div class="panel-section">
-                <h3>VISUAL CORTEX</h3>
+                <div class="section-header">
+                    <h3>VISUAL CORTEX</h3>
+                    <span class="precision-badge">PRECISION VIEW</span>
+                </div>
                 <div class="vision-feed" id="vision-feed">
                     <div class="placeholder-cam">No Active Signal</div>
+                </div>
+                <div class="precision-view-container">
+                    <div class="precision-crop" id="precision-crop">
+                        <div class="placeholder-cam">ARAFURA LUPA</div>
+                    </div>
                 </div>
                 <div class="terminal-log" id="visual-log">
                     <!-- Logs -->
@@ -88,20 +124,21 @@
                     <!-- Logs -->
                 </div>
             </div>
-        </aside>
-    </div>
-    <!-- AUTONOMY OVERLAY -->
-    <div id="autonomy-overlay" class="autonomy-overlay hidden">
-        <div class="autonomy-content">
-            <div class="bot-icon">🤖</div>
-            <h2>MODO AUTÓNOMO ACTIVO</h2>
-            <div class="timer-box">
-                <span id="auto-timer">00</span><small>s</small>
+
+            <!-- AUTONOMY OVERLAY INTEGRATED v5.1 -->
+            <div id="autonomy-overlay" class="autonomy-overlay hidden">
+                <div class="autonomy-content">
+                    <div class="bot-icon">🤖</div>
+                    <h2>MODO AUTÓNOMO ACTIVO</h2>
+                    <div class="timer-box">
+                        <span id="auto-timer">00</span><small>s</small>
+                    </div>
+                    <div class="auto-status" id="auto-status">Iniciando protocolo...</div>
+                    <div class="auto-count">Acciones: <span id="auto-action-count">0</span></div>
+                    <button id="close-auto-btn" class="close-overlay-btn">CERRAR Y MANTENER</button>
+                </div>
             </div>
-            <div class="auto-status" id="auto-status">Iniciando protocolo...</div>
-            <div class="auto-count">Acciones: <span id="auto-action-count">0</span></div>
-            <button id="close-auto-btn" class="close-overlay-btn">CERRAR Y MANTENER</button>
-        </div>
+        </aside>
     </div>
 
     <script src="/static/js/app.js"></script>

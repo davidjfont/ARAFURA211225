@@ -26,3 +26,9 @@ opencv-python
 
 # TUI
 rich>=13.0.0
+
+# Web Server (Hybrid Mode)
+fastapi
+uvicorn
+websockets
+python-multipart

@@ -6,6 +6,7 @@ import io
 import threading
 from pathlib import Path
 from datetime import datetime
+from core.ui.ghost_cursor import GhostCursor
 
 # Intentos de importación de dependencias visuales
 try:
@@ -28,6 +29,11 @@ class VisualAgent:
         self.running = False
         self.base_path = Path(__file__).parent.parent.parent
         self.prompt_path = self.base_path / "core" / "prompts" / "arafura_agent_visual.md"
+        self.event_callback = None # Set by Orchestrator
+        
+        # ARAFURA tracker (Dual Cursor Overlay)
+        self.ghost_cursor = GhostCursor()
+        # Se inicia manualmente via start_ghost_cursor para evitar robo de foco inicial
         
         # Configuraciones de seguridad
         if pyautogui:
@@ -45,37 +51,32 @@ class VisualAgent:
         if not ImageGrab: missing.append("pillow")
         return missing
 
+    def start_ghost_cursor(self):
+        """Inicia el overlay visual. Llamar después de la configuración del CLI."""
+        if self.ghost_cursor:
+            print("[VisualAgent] Iniciando ARAFURA Pointer Overlay...")
+            self.ghost_cursor.start()
+
     def list_windows(self):
         if not gw: return []
         # Filtrar ventanas visibles y con título, excluyendo el overlay propio
         return [w for w in gw.getAllWindows() if w.title and w.visible and w.title != "Program Manager" and "ARAFURA Vision Overlay" not in w.title]
 
-    def _update_overlay_state(self, x=0, y=0):
-        """Sincroniza el estado con el overlay"""
-        return # DISABLED BY USER REQUEST
-        
-        state_file = self.base_path / "core" / "memory" / "overlay_state.json"
-        
-        data = {
-            "active": False,
-            "target_rect": None,
-            "cursor_pos": [x, y]
-        }
-        
-        if self.active_window:
-            data["active"] = True
-            data["target_rect"] = [
-                self.active_window.left,
-                self.active_window.top,
-                self.active_window.width,
-                self.active_window.height
-            ]
+    def _update_overlay_state(self, x=0, y=0, state=None):
+        """Sincroniza el estado con el ARAFURA tracker"""
+        if self.ghost_cursor:
+            if x != 0 or y != 0:
+                self.ghost_cursor.update_position(x, y)
+            if state:
+                self.ghost_cursor.set_state(state)
             
-        try:
-            with open(state_file, 'w') as f:
-                json.dump(data, f)
-        except Exception: 
-            pass
+            if self.active_window:
+                self.ghost_cursor.set_target_window(
+                    self.active_window.left,
+                    self.active_window.top,
+                    self.active_window.width,
+                    self.active_window.height
+                )
 
     def get_mouse_pos(self):
         """Devuelve coordenadas (x, y) actuales"""
@@ -86,7 +87,10 @@ class VisualAgent:
     def select_window(self, window_obj):
         self.active_window = window_obj
         self.force_activate()  # Bring to front immediately
-        self._update_overlay_state()
+        # Inicializar ARAFURA tracker en el centro de la ventana
+        cx = self.active_window.left + self.active_window.width // 2
+        cy = self.active_window.top + self.active_window.height // 2
+        self._update_overlay_state(x=cx, y=cy, state="tracking")
         return True
     
     def force_activate(self):
@@ -139,29 +143,41 @@ class VisualAgent:
         
         # Intérprete de acciones simples (extender según necesidad)
         try:
+            # 0. Prep Ghost State
+            is_exploratory = action.startswith("move") or action.startswith("hover")
+            new_state = "scanning" if is_exploratory else "acting"
+            self._update_overlay_state(state=new_state)
+            
+            # 1. CAPTURE "BEFORE" CROP (Precision Vision)
+            self.capture_cursor_crop(save_name="cursor_crop.png")
+            
             # Force window to foreground BEFORE any action
             self.force_activate()
             
             # Ej: "click 200, 300"
+            # Ej: "click 200, 300" or "click_norm 273 681"
             if action.startswith("click") and not action.startswith("doubleclick"):
                 parts = action.replace(",", "").split()
                 if len(parts) >= 3:
-                    x, y = int(parts[1]), int(parts[2])
+                    x_raw, y_raw = float(parts[1]), float(parts[2])
                     
-                    # VLM outputs ABSOLUTE coordinates (already screen-based)
-                    # Only add offset if coords are clearly in-window relative (small values)
-                    if x < self.active_window.width and y < self.active_window.height:
-                        # Relative -> Absolute
-                        abs_x = self.active_window.left + x
-                        abs_y = self.active_window.top + y
+                    # DETECTION: Is it normalized (0-1000) or pixel-based?
+                    # If action is 'click_norm' or values are floats/small, we scale.
+                    if action.startswith("click_norm") or (x_raw <= 1000 and y_raw <= 1000 and not action.startswith("click_pix")):
+                        # Scale 0-1000 to window width/height
+                        x = int((x_raw / 1000.0) * self.active_window.width)
+                        y = int((y_raw / 1000.0) * self.active_window.height)
                     else:
-                        # Already absolute
-                        abs_x, abs_y = x, y
+                        x, y = int(x_raw), int(y_raw)
                     
-                    print(f" -> Click en: {abs_x}, {abs_y}")
+                    # Relative -> Absolute
+                    abs_x = self.active_window.left + x
+                    abs_y = self.active_window.top + y
+                    
+                    print(f" -> Click en: {abs_x}, {abs_y} (Scaled from {x_raw}, {y_raw})")
                     pyautogui.click(abs_x, abs_y)
-                    time.sleep(0.05)  # Let click register
-                    self._update_overlay_state(abs_x, abs_y)
+                    time.sleep(0.05)
+                    self._update_overlay_state(abs_x, abs_y, state="tracking")
             
             # Ej: "type hola"
             elif action.startswith("type"):
@@ -272,15 +288,21 @@ class VisualAgent:
                         abs_y = self.active_window.top + y
                     else:
                         abs_x, abs_y = x, y
-                    
-                    pyautogui.moveTo(abs_x, abs_y)
+                        
+                    print(f" -> Move Tracking: ({abs_x}, {abs_y})")
+                    pyautogui.moveTo(abs_x, abs_y, duration=0.2) # Smooth glide
+                    self._update_overlay_state(abs_x, abs_y, state="scanning")
                 
             # Ej: "wait" or "wait 3" (seconds)
             elif action.startswith("wait"):
                 parts = action.split()
-                seconds = int(parts[1]) if len(parts) > 1 else 2
-                time.sleep(seconds)
+                wait_sec = int(parts[1]) if len(parts) > 1 else 2
+                time.sleep(wait_sec)
                 
+            # 2. CAPTURE "AFTER" CROP (Action Verification)
+            time.sleep(0.2) # Wait for UI to react
+            self.capture_cursor_crop(save_name="cursor_crop_after.png")
+            
             return "Success"
         except Exception as e:
             return f"Failed: {e}"
@@ -373,6 +395,55 @@ class VisualAgent:
             return img
         except Exception as e:
             print(f"Frame Capture Error: {e}")
+            return None
+
+    def capture_cursor_crop(self, size=500, save_name=None):
+        """Captura un crop 500x500 centrado en el puntero de ARAFURA"""
+        if not self.ghost_cursor or not ImageGrab:
+            return None
+            
+        try:
+            x, y = self.ghost_cursor.x, self.ghost_cursor.y
+            sw, sh = pyautogui.size()
+            
+            left = max(0, x - size // 2)
+            top = max(0, y - size // 2)
+            right = min(sw, left + size)
+            bottom = min(sh, top + size)
+            
+            # Re-adjust left/top if right/bottom were capped to maintain size
+            if right == sw: left = max(0, sw - size)
+            if bottom == sh: top = max(0, sh - size)
+            
+            crop = ImageGrab.grab(bbox=(left, top, right, bottom))
+            
+            if save_name:
+                crops_dir = self.base_path / "core" / "memory" / "vision_crops"
+                crops_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save with timestamp for history, and as fixed name for current analysis
+                timestamp = datetime.now().strftime("%H%M%S")
+                crop.save(crops_dir / f"{timestamp}_{save_name}")
+                crop.save(crops_dir / save_name)
+                
+                # Cleanup older crops (keep last 20)
+                all_crops = sorted(crops_dir.glob("*.png"))
+                if len(all_crops) > 20:
+                    for old in all_crops[:-20]:
+                        try: old.unlink()
+                        except: pass
+                
+                # EMIT TO WEB UI
+                if self.event_callback:
+                    import io, base64
+                    buf = io.BytesIO()
+                    crop.save(buf, format="PNG")
+                    b64_crop = base64.b64encode(buf.getvalue()).decode('utf-8')
+                    self.event_callback("vision_crop", {"image": b64_crop})
+                        
+            return crop
+        except Exception as e:
+            print(f"Cursor Crop Error: {e}")
             return None
 
     def run_cycle_step(self):

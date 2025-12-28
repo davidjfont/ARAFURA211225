@@ -8,6 +8,14 @@ roles:
       n_ctx: 2048
       temperature: 0.8
 
+  # Capa 0: Sensor OCR (Tesseract Local)
+  ocr:
+    source: "local_tesseract"
+    model_match: "tesseract"
+    task_types: ["ocr", "text_extraction"]
+    params:
+      psm: 3 # Page Segmentation Mode
+
   # Capa Visual (Ollama LLaVA)
   vision:
     source: "ollama"

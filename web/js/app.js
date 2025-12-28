@@ -25,9 +25,25 @@ const statusAuto = document.getElementById('auto-status');
 const countAuto = document.getElementById('auto-action-count');
 const btnCloseAuto = document.getElementById('close-auto-btn');
 
+// Tactical Buttons v4.1
+const btnVision = document.getElementById('btn-mode-vision');
+const btnAuto = document.getElementById('btn-mode-auto');
+const btnGamer = document.getElementById('btn-mode-gamer');
+const btnStop = document.getElementById('btn-mode-stop');
+
+// Nucleus Indicators v4.1
+const barLoad = document.getElementById('bar-load');
+const valSync = document.getElementById('val-sync');
+const valMTrace = document.getElementById('val-mtrace');
+
 let manualOverlayClose = false;
 let localRemainingTime = 0;
 let timerInterval = null;
+
+// Button State Tracking
+let isVisionActive = false;
+let isAutonomyActive = false;
+let isGamerActive = false;
 
 function startLocalTimer(seconds) {
     if (timerInterval) clearInterval(timerInterval);
@@ -98,10 +114,7 @@ function handleEvent(data) {
                 });
             }
             if (payload.mode) {
-                elMode.innerText = payload.mode.toUpperCase();
-                if (payload.mode.startsWith("AUTO") || payload.autonomy) {
-                    overlayAuto.classList.remove('hidden');
-                }
+                syncUIWithMode(payload.mode, payload.autonomy);
             }
             scrollToBottom();
             break;
@@ -127,41 +140,7 @@ function handleEvent(data) {
                 barProsperity.style.width = payload.prosperity + "%";
             }
             if (payload.mode) {
-                elMode.innerText = payload.mode.toUpperCase();
-
-                // Overlay Logic
-                const isAuto = payload.mode.startsWith("AUTO");
-
-                if (isAuto) {
-                    // Reset manual close if it's a "fresh" auto start (detected by very high seconds or manual trigger)
-                    // (Actually we trust the backend logic to only send mode:AUTO when active)
-
-                    if (!manualOverlayClose) {
-                        overlayAuto.classList.remove('hidden');
-                    }
-
-                    const timePart = parseInt(payload.mode.replace("AUTO ", "").replace("s", ""));
-
-                    // Only start/sync if difference is significant or it's a new auto start
-                    if (Math.abs(localRemainingTime - timePart) > 2 || !timerInterval) {
-                        startLocalTimer(timePart);
-                    }
-
-                    if (payload.action_count !== undefined) {
-                        countAuto.innerText = payload.action_count;
-                    }
-                    if (payload.last_action) {
-                        statusAuto.innerText = payload.last_action;
-                    }
-                } else {
-                    // Not in auto mode anymore
-                    overlayAuto.classList.add('hidden');
-                    manualOverlayClose = false;
-                    if (timerInterval) {
-                        clearInterval(timerInterval);
-                        timerInterval = null;
-                    }
-                }
+                syncUIWithMode(payload.mode, payload.autonomy, payload.gamer);
             }
             break;
 
@@ -185,7 +164,52 @@ function handleEvent(data) {
                 elMouse.innerText = `Mouse: ${payload.x}, ${payload.y}`;
             }
             break;
+
+        case 'vision_crop':
+            // Payload: { image: "base64..." }
+            const precisionCrop = document.getElementById('precision-crop');
+            if (payload.image && precisionCrop) {
+                precisionCrop.innerHTML = `<img src="data:image/png;base64,${payload.image}" />`;
+            }
+            break;
+
+        case 'nucleus_update':
+            // Payload: { load: 25, sync: 'ACTIVE', trace: '#F0A1' }
+            if (payload.load !== undefined) barLoad.style.width = payload.load + "%";
+            if (payload.sync) valSync.innerText = payload.sync;
+            if (payload.trace) valMTrace.innerText = payload.trace;
+            break;
     }
+}
+
+function syncUIWithMode(mode, autonomyActive, gamerActive) {
+    elMode.innerText = mode.toUpperCase();
+    const m = mode.toLowerCase();
+    // 1. VISION SYNC (Active if mode is vision, gamer, or auto)
+    isVisionActive = m.includes("vision") || m.includes("gamer") || m.includes("auto");
+    isVisionActive ? btnVision.classList.add('active') : btnVision.classList.remove('active');
+
+    // 2. AUTONOMY SYNC
+    isAutonomyActive = autonomyActive || m.includes("auto");
+    if (isAutonomyActive) {
+        btnAuto.classList.add('active');
+        if (!manualOverlayClose) overlayAuto.classList.remove('hidden');
+
+        // Timer Sync
+        const timePart = parseInt(mode.replace("AUTO ", "").replace("s", ""));
+        if (!isNaN(timePart) && (Math.abs(localRemainingTime - timePart) > 2 || !timerInterval)) {
+            startLocalTimer(timePart);
+        }
+    } else {
+        btnAuto.classList.remove('active');
+        overlayAuto.classList.add('hidden');
+        manualOverlayClose = false;
+        if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    }
+
+    // 3. GAMER SYNC
+    isGamerActive = gamerActive || m.includes("gamer") || m.includes("auto");
+    isGamerActive ? btnGamer.classList.add('active') : btnGamer.classList.remove('active');
 }
 
 function showThinking() {
@@ -263,3 +287,46 @@ sendBtn.addEventListener('click', sendMessage);
 userInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
 });
+
+// Helper for sending commands with immediate visual feedback
+function sendCommand(text) {
+    if (socket.readyState !== WebSocket.OPEN) {
+        addSystemMessage("⚠️ Connection not ready. Please wait...");
+        return;
+    }
+
+    // Add to chat history so user knows the click did something
+    addMessage("USER", text);
+    showThinking();
+    socket.send(text);
+}
+
+// Tactical Button Toggle Logic v4.4
+btnVision.onclick = () => {
+    if (isVisionActive) sendCommand("/mode chat");
+    else sendCommand("/mode vision");
+};
+
+btnAuto.onclick = () => {
+    if (isAutonomyActive) sendCommand("/actua stop");
+    else sendCommand("/actua 60");
+};
+
+btnGamer.onclick = () => {
+    // Gamer mode is a toggle in backend usually, but we send /gamer
+    sendCommand("/gamer");
+};
+
+btnStop.onclick = () => {
+    // EMERGENCY STOP & RESET
+    addSystemMessage("🛑 EMERGENCY STOP: Resetting System Mode...");
+    sendCommand("/actua stop");
+
+    // UI Local Reset
+    manualOverlayClose = false;
+    overlayAuto.classList.add('hidden');
+
+    // Force deactivation of all buttons locally for instant feedback
+    [btnVision, btnAuto, btnGamer].forEach(btn => btn.classList.remove('active'));
+    isVisionActive = isAutonomyActive = isGamerActive = false;
+};

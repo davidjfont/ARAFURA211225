@@ -185,10 +185,10 @@ class ArafuraCortex:
         grid.add_column(justify="right")
         
         # Estado del modelo activo obtenible del router si quisiéramos
-        model_name = "Core Orchestrator v2"
+        model_name = "Core Orchestrator v4.1"
         
         grid.add_row(
-            "[b magenta]ARAFURA[/] [cyan]Core System v2[/]",
+            "[b magenta]ARAFURA[/] [cyan]Core System v4.1[/]",
             f"[dim]System: Online | {datetime.now().strftime('%H:%M:%S')}[/]"
         )
         return Panel(grid, style="white on black", box=box.HEAVY_EDGE)

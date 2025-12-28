@@ -1,19 +1,33 @@
 # ARAFURA - Git Ignore
 
 # Personal Logs and Sessions
-sessions/*.jsonl
 sessions/
+sessions/*.jsonl
+sessions/*.log
 
 # Captured Images (Visual Agent)
+captures/
 captures/*.jpg
 captures/*.png
-captures/
+captures/*.webp
+
+# Root Test/Debug Artifacts
+test_*.png
+test_*.jpg
+debug_*.png
+debug_*.jpg
+*.tessdata
 
 # Internal Memory and Evolution State
+core/memory/
 core/memory/*.json
 core/memory/*.jsonl
 core/memory/states/
 core/memory/evolution.jsonl
+core/memory/overlay_state.json
+
+# Identity (Personal)
+arafura_identity.json
 
 # Python artifacts
 __pycache__/
@@ -30,6 +44,7 @@ venv/
 .idea/
 .DS_Store
 *.log
+Thumbs.db
 
 # Models and Large Files
 models/

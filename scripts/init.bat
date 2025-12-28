@@ -32,22 +32,30 @@ if not exist "venv" (
 
 REM Activar entorno
 echo [*] Activando entorno virtual...
-if exist "venv\Scripts\activate.bat" (
-    call "venv\Scripts\activate.bat"
-    echo [OK] Entorno activado
-) else (
-    echo [!] No se pudo activar el entorno virtual
+if not exist "venv\Scripts\python.exe" (
+    echo [!] No se pudo encontrar el entorno virtual - saltando
+    goto :dependencies
 )
 
+REM Manual activation to avoid activate.bat path issues with ampersands
+set "VIRTUAL_ENV=%CD%\venv"
+set "PATH=%VIRTUAL_ENV%\Scripts;%PATH%"
+set "PYTHONHOME="
+echo [OK] Entorno activado (Manual Sync)
+
+:dependencies
 REM Instalar dependencias
-if exist "terminals\cli\requirements.txt" (
-    echo [*] Instalando dependencias...
-    pip install -r "terminals\cli\requirements.txt" -q
-    pip install pyautogui pywin32 -q
-    echo [OK] Dependencias instaladas
-) else (
+if not exist "terminals\cli\requirements.txt" (
     echo [!] requirements.txt no encontrado - saltando
+    goto :dotenv
 )
+
+echo [*] Instalando dependencias...
+pip install -r "terminals\cli\requirements.txt"
+pip install pyautogui pywin32
+echo [OK] Dependencias instaladas
+
+:dotenv
 
 REM Crear .env si no existe
 if not exist ".env" (

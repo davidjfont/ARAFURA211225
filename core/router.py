@@ -3,6 +3,7 @@ import json
 import urllib.request
 import threading
 from pathlib import Path
+import os
 
 try:
     from llama_cpp import Llama
@@ -55,6 +56,89 @@ class OllamaWrapper:
                 ]
             }
 
+class GeminiWrapper:
+    def __init__(self, model_name: str, api_key: str):
+        self.model_name = model_name
+        self.api_key = api_key
+        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+
+    def create_chat_completion(self, messages, temperature=0.0, max_tokens=1024, **kwargs):
+        """Streaming-less implementation for Gemini via REST API"""
+        
+        # Convert OpenAI-like messages to Gemini format
+        contents = []
+        system_instruction = None
+        
+        for m in messages:
+            role = m['role']
+            content = m['content']
+            
+            if role == 'system':
+                system_instruction = {"role": "user", "parts": [{"text": content}]} # Gemini often treats system as first user msg or separate field
+                continue
+                
+            parts = [{"text": content}]
+            
+            # Handle Images (base64)
+            if 'images' in m:
+                for b64_img in m['images']:
+                    parts.append({
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": b64_img
+                        }
+                    })
+            
+            gemini_role = "model" if role == "assistant" else "user"
+            contents.append({"role": gemini_role, "parts": parts})
+
+        # Payload construction
+        payload = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "responseMimeType": "application/json" # Force JSON for OCR
+            }
+        }
+        
+        # System Instruction for Gemini 1.5
+        if system_instruction:
+             # Older API versions might simple prepend to contents, 
+             # but 1.5 supports system_instruction field.
+             # For safety/compatibility with standard REST, prepending to contents[0] is often safer 
+             # if we don't know exact version, but 'system_instruction' field is cleaner.
+             # Let's try prepending text to first user message context if possible, 
+             # OR use the proper field. Let's use the field.
+             payload["system_instruction"] = {"parts": [{"text": messages[0]['content']}]} if messages[0]['role'] == 'system' else None
+
+        try:
+            req = urllib.request.Request(
+                self.api_url, 
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'}
+            )
+            with urllib.request.urlopen(req) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                
+            # Extract content
+            try:
+                text_content = result['candidates'][0]['content']['parts'][0]['text']
+            except (KeyError, IndexError):
+                text_content = ""
+                
+            return {
+                'choices': [
+                    {'message': {'content': text_content}}
+                ]
+            }
+        except Exception as e:
+            return {
+                'choices': [
+                    {'message': {'content': f"Error Gemini: {str(e)}"}}
+                ]
+            }
+
 class ModelRouter:
     def __init__(self, base_path: Path):
         self.base_path = base_path
@@ -94,7 +178,7 @@ class ModelRouter:
                 try:
                     # Comprobación básica (ping) con Timeout corto
                     with urllib.request.urlopen("http://localhost:11434/", timeout=2) as r:
-                        if r.status != 200: raise Exception("Ollama offline")
+                         if r.status != 200: raise Exception("Ollama offline")
                     
                     wrapper = OllamaWrapper(model_name=match_pattern)
                     self.loaded_models[role] = wrapper
@@ -102,6 +186,23 @@ class ModelRouter:
                 except Exception as e:
                     print(f"[Router] Error Ollama {role}: {e}")
                     return None
+
+            # GOOGLE GEMINI API SOURCE
+            if source == 'google_api':
+                print(f"[Router] Conectando {role} -> Google Gemini API...")
+                api_key = os.environ.get("GEMINI_API_KEY")
+                # Fallback to file
+                key_file = self.base_path / ".gemini_key"
+                if not api_key and key_file.exists():
+                     api_key = key_file.read_text().strip()
+                
+                if not api_key:
+                    print(f"[Router] Error: No API Key found for {role}. Set GEMINI_API_KEY env or .gemini_key file.")
+                    return None
+                    
+                wrapper = GeminiWrapper(model_name=match_pattern, api_key=api_key)
+                self.loaded_models[role] = wrapper
+                return wrapper
 
         # LOCAL GGUF SOURCE
         found_path = None
