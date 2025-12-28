@@ -60,15 +60,24 @@ graph TD
 
 ## 👁️ Control Táctico y Autonomía
 
-ARAFURA implementa una interfaz de control de misión avanzada:
+ARAFURA implementa una interfaz de control de misión avanzada con lógica de estados jerárquica:
 
-| Funcionalidad | Descripción |
-| :--- | :--- |
-| **Visión (👁️)** | Activa el procesamiento visual y la mira de precisión (Lupa). |
-| **Autonomía (🤖)** | Inicia el bucle autónomo con contador persistente y feedback local. |
-| **Reset (🛑)** | Emergencia: detiene procesos y limpia la interfaz instantáneamente. |
-| **Precision View** | Ventana de alta resolución (500x500px) que sigue el foco de la IA. |
+### 🕹️ Funcionalidad de Controles
 
+| Icono | Botón | Función Principal | Comportamiento Técnico |
+| :--- | :--- | :--- | :--- |
+| 👁️ | **Visión** | **"Abrir los ojos"** | Activa el pipeline de percepción (`VisionPipeline`). El sistema empieza a capturar y "entender" lo que sucede en pantalla en tiempo real (5 FPS), pero **no realiza ninguna acción**. Es un modo pasivo/observador. Inyecta el contexto visual en el chat. |
+| 🤖 | **Autonomía** | **"Activar las manos"** | Inicia el bucle de agencia (`active_window` + `mouse/keyboard`). El sistema empieza a **ejecutar acciones** por sí mismo. Por defecto funciona en ciclos de **60 segundos** (timer visible en el botón). *Nota: Activa automáticamente el modo Visión.* |
+| 🎮 | **Gamer** | **"Modo Competitivo"** | Cambia la personalidad del sistema (`arafura_gamer.md`) a una más agresiva y enfocada en objetivos rápidos. **Fuerza el modo Visión** y prioriza la velocidad de reacción sobre la reflexión profunda. |
+| 🛑 | **STOP** | **"Kill Switch"** | Detiene **inmediatamente** cualquier bucle autónomo, cancela hilos de ejecución pendientes y devuelve el sistema al modo seguro (`CHAT`). Resetea la interfaz visual localmente. |
+
+### 🔗 Sinergia y Jerarquía
+
+El sistema opera bajo una **Jerarquía de Modos** interna: `AUTONOMÍA > GAMER > VISIÓN > CHAT`
+
+1.  **Visión + Autonomía**: Son complementarios. No puedes tener Autonomía sin Visión (el botón 🤖 encenderá automáticamente el 👁️ si está apagado). Sin embargo, puedes tener Visión sin Autonomía (para que el bot te ayude o comente sin tomar el control).
+2.  **Autonomía + Gamer**: Es la combinación más "letal". El sistema actúa por su cuenta (🤖) pero utilizando su personalidad competitiva y reglas de decisión rápida (🎮). Ideal para juegos o trading de alta frecuencia.
+3.  **El Botón Rojo (STOP)**: Es el "Jefe". Anula cualquier combinación activa. Si estás en *Gamer + Autonomía* y pulsas 🛑, ambos se apagan y vuelves a ser un simple chat de texto.
 ---
 
 ## ⌨️ Comandos RAG y Operación

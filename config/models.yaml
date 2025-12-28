@@ -2,7 +2,7 @@ roles:
   # Capa 1: Reflejos rápidos y pensamientos de fondo
   reflexion:
     source: "ollama"
-    model_match: "phi"
+    model_match: ["phi", "mistral"]
     task_types: ["background_thought", "quick_check", "reflexion"]
     params:
       n_ctx: 2048
@@ -16,26 +16,28 @@ roles:
     params:
       psm: 3 # Page Segmentation Mode
 
-  # Capa Visual (Ollama LLaVA)
+  # Capa Visual (Vision-Language Models)
   vision:
     source: "ollama"
-    model_match: "llava" 
+    model_match: ["qwen3-vl:8b", "llava"] 
     task_types: ["visual_perception", "image_analysis"]
     params:
-      n_ctx: 4096 # Increased for better resolution handling
-      temperature: 0.1  # Creativo para "pensamientos"
+      n_ctx: 8192 # Qwen3 handles more context effectively
+      temperature: 0.1
 
   # Capa 2: Interacción general y narrativa
   chat:
-    model_match: "mistral" 
+    source: "ollama"
+    model_match: ["mistral", "qwen3-vl:8b"] 
     task_types: ["chat", "summary", "translation", "lang=ES"]
     params:
       n_ctx: 4096
       temperature: 0.7
 
-  # Capa 3: Razonamiento Profundo (DeepSeek Local GGUF)
+  # Capa 3: Razonamiento Profundo (Advanced Logic)
   deep_thought:
-    model_match: "DeepSeek-R1-Distill-Llama-8B-Q4_K_M"
+    source: "ollama" # Priority transition to Ollama for GPT-OSS
+    model_match: ["gpt-oss-20b", "DeepSeek-R1-Distill-Llama-8B-Q4_K_M"]
     task_types: ["complex_logic", "code_generation", "strategic_planning", "market_analysis"]
     params:
       n_ctx: 8192

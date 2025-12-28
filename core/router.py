@@ -39,22 +39,39 @@ class OllamaWrapper:
             )
             with urllib.request.urlopen(req) as response:
                 result = json.loads(response.read().decode('utf-8'))
-                # Debug logging
-                # print(f"[Ollama DEBUG] Raw Response keys: {result.keys()}") 
                 
-            # Adaptar respuesta al formato OpenAI/LlamaCpp
             content = result.get('message', {}).get('content', '')
-            return {
-                'choices': [
-                    {'message': {'content': content}}
-                ]
-            }
+            return {'choices': [{'message': {'content': content}}]}
         except Exception as e:
-            return {
-                'choices': [
-                    {'message': {'content': f"Error Ollama: {str(e)}"}}
-                ]
+            return {'choices': [{'message': {'content': f"Error Ollama: {str(e)}"}}]}
+
+    def stream_chat_completion(self, messages, temperature=0.7, max_tokens=1024, **kwargs):
+        """Generador para streaming de tokens desde Ollama"""
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
             }
+        }
+        
+        try:
+            req = urllib.request.Request(
+                self.api_url, 
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'}
+            )
+            with urllib.request.urlopen(req) as response:
+                for line in response:
+                    if line:
+                        chunk = json.loads(line.decode('utf-8'))
+                        content = chunk.get('message', {}).get('content', '')
+                        if content:
+                            yield content
+        except Exception as e:
+            yield f"[Stream Error: {e}]"
 
 class GeminiWrapper:
     def __init__(self, model_name: str, api_key: str):
@@ -97,10 +114,13 @@ class GeminiWrapper:
             "contents": contents,
             "generationConfig": {
                 "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-                "responseMimeType": "application/json" # Force JSON for OCR
+                "maxOutputTokens": max_tokens
             }
         }
+        
+        # Optional JSON mode (Gemini 1.5+)
+        if kwargs.get("json_mode"):
+            payload["generationConfig"]["responseMimeType"] = "application/json"
         
         # System Instruction for Gemini 1.5
         if system_instruction:
@@ -169,75 +189,73 @@ class ModelRouter:
                 return None
                 
             config = self.roles_config[role]
-            source = config.get('source', 'local')
-            match_pattern = config.get('model_match', '')
+            source_pref = config.get('source', 'local')
+            match_patterns = config.get('model_match', '')
             
-            # OLLAMA SOURCE
-            if source == 'ollama':
-                print(f"[Router] Conectando {role} -> Ollama ({match_pattern})...")
-                try:
-                    # Comprobación básica (ping) con Timeout corto
-                    with urllib.request.urlopen("http://localhost:11434/", timeout=2) as r:
-                         if r.status != 200: raise Exception("Ollama offline")
-                    
-                    wrapper = OllamaWrapper(model_name=match_pattern)
-                    self.loaded_models[role] = wrapper
-                    return wrapper
-                except Exception as e:
-                    print(f"[Router] Error Ollama {role}: {e}")
-                    return None
-
-            # GOOGLE GEMINI API SOURCE
-            if source == 'google_api':
-                print(f"[Router] Conectando {role} -> Google Gemini API...")
-                api_key = os.environ.get("GEMINI_API_KEY")
-                # Fallback to file
-                key_file = self.base_path / ".gemini_key"
-                if not api_key and key_file.exists():
-                     api_key = key_file.read_text().strip()
-                
-                if not api_key:
-                    print(f"[Router] Error: No API Key found for {role}. Set GEMINI_API_KEY env or .gemini_key file.")
-                    return None
-                    
-                wrapper = GeminiWrapper(model_name=match_pattern, api_key=api_key)
-                self.loaded_models[role] = wrapper
-                return wrapper
-
-        # LOCAL GGUF SOURCE
-        found_path = None
-        if self.models_dir.exists():
-            candidates = list(self.models_dir.glob("*.gguf"))
-            for c in candidates:
-                if match_pattern.lower() in c.name.lower():
-                    found_path = c.resolve() # Use absolute path for cache key
-                    break
+            if isinstance(match_patterns, str):
+                match_patterns = [match_patterns]
             
-        if found_path:
-            # CHECK CACHE FIRST
-            if str(found_path) in self._model_cache:
-                print(f"[Router] Reusando modelo cargado para {role} -> {found_path.name}")
-                instance = self._model_cache[str(found_path)]
-                self.loaded_models[role] = instance
-                return instance
+            for match_pattern in match_patterns:
+                # --- 1. TRY OLLAMA (if preferred or as fallback) ---
+                if source_pref == 'ollama' or True: # Try ollama regardless if it's in the list
+                    try:
+                        # Rapid check for Ollama availability
+                        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=1) as r:
+                             if r.status == 200:
+                                 # Check if model exists (exact match or prefix)
+                                 tags = json.loads(r.read().decode('utf-8')).get('models', [])
+                                 found = False
+                                 for m in tags:
+                                     m_name = m['name']
+                                     # Match "model" with "model:latest" or "model:7b"
+                                     if m_name == match_pattern or m_name.startswith(match_pattern + ":"):
+                                         print(f"[Router] Encontrado en Ollama: {m_name}")
+                                         wrapper = OllamaWrapper(model_name=m_name)
+                                         self.loaded_models[role] = wrapper
+                                         return wrapper
+                    except:
+                        pass # Ollama offline or model not there
 
-            if Llama:
-                print(f"[Router] Cargando {role} -> {found_path.name} (Puede tardar)...")
-                try:
-                    llm = Llama(
-                        model_path=str(found_path),
-                        n_ctx=config.get('params', {}).get('n_ctx', 2048),
-                        n_threads=4,
-                        verbose=False
-                    )
-                    # Store in cache
-                    self._model_cache[str(found_path)] = llm
-                    self.loaded_models[role] = llm
-                    return llm
-                except Exception as e:
-                    print(f"[Router] Error cargando {role}: {e}")
-                    return None
-        return None
+                # --- 2. TRY LOCAL GGUF ---
+                if source_pref == 'local' or True:
+                    found_path = None
+                    if self.models_dir.exists():
+                        candidates = list(self.models_dir.glob("*.gguf"))
+                        for c in candidates:
+                            if match_pattern.lower() in c.name.lower():
+                                found_path = c.resolve()
+                                break
+                    
+                    if found_path:
+                        if str(found_path) in self._model_cache:
+                            instance = self._model_cache[str(found_path)]
+                            self.loaded_models[role] = instance
+                            return instance
+                        if Llama:
+                            print(f"[Router] Cargando GGUF: {found_path.name}...")
+                            try:
+                                llm = Llama(
+                                    model_path=str(found_path),
+                                    n_ctx=config.get('params', {}).get('n_ctx', 2048),
+                                    n_threads=4,
+                                    verbose=False
+                                )
+                                self._model_cache[str(found_path)] = llm
+                                self.loaded_models[role] = llm
+                                return llm
+                            except:
+                                pass
+
+                # --- 3. TRY GOOGLE API ---
+                if source_pref == 'google_api':
+                    api_key = os.environ.get("GEMINI_API_KEY")
+                    if api_key:
+                        wrapper = GeminiWrapper(model_name=match_pattern, api_key=api_key)
+                        self.loaded_models[role] = wrapper
+                        return wrapper
+
+            print(f"[Router] CRITICAL: No model found for role '{role}' in any source.")
+            return None
 
     def route_request(self, task_type: str, prompt: str, system_prompt: str = None, context_messages: list = None, images: list = None):
         # 1. Determinar Rol
@@ -317,11 +335,68 @@ class ModelRouter:
             msgs.append(msg)
         
         try:
+            # Force JSON mode for specific task types if using a model that supports it
+            json_requested = task_type in ["visual", "complex_logic", "json_data"]
+            
             res = llm.create_chat_completion(
                 messages=msgs,
                 temperature=temp,
-                max_tokens=2048 
+                max_tokens=2048,
+                json_mode=json_requested
             )
             return res['choices'][0]['message']['content']
         except Exception as e:
             return f"[Router Error] {e}"
+
+    def stream_request(self, task_type: str, prompt: str, system_prompt: str = None, context_messages: list = None, images: list = None):
+        """Versión generadora de route_request para visualizar pensamientos en tiempo real"""
+        # 1. Determinar Rol
+        selected_role = "chat"
+        if task_type in ["thought", "reflexion"]: selected_role = "reflexion"
+        elif task_type in ["visual", "image_analysis"]: selected_role = "vision"
+        elif task_type in ["logic", "analysis", "complex_logic"]: selected_role = "deep_thought"
+            
+        # 2. Obtener modelo 
+        llm = self.load_model(selected_role)
+        if not llm:
+            yield "Error: Modelo no cargado."
+            return
+
+        # 3. Preparar Mensajes (Reutilizando lógica de construcción)
+        role_params = self.roles_config.get(selected_role, {}).get('params', {})
+        temp = role_params.get('temperature', 0.7)
+        
+        msgs = []
+        if system_prompt and selected_role != "vision":
+             msgs.append({"role": "system", "content": system_prompt})
+        
+        if context_messages:
+            msgs.extend([dict(m) for m in context_messages])
+            if prompt: msgs.append({"role": "user", "content": prompt})
+        else:
+            content = prompt if prompt else "..."
+            msg = {"role": "user", "content": content}
+            if images and selected_role == "vision": msg["images"] = images
+            msgs.append(msg)
+
+        # 4. Stream
+        if hasattr(llm, 'stream_chat_completion'):
+            for token in llm.stream_chat_completion(messages=msgs, temperature=temp):
+                yield token
+        else:
+            # Fallback a normal si no soporta stream
+            res = llm.create_chat_completion(messages=msgs, temperature=temp)
+            yield res['choices'][0]['message']['content']
+
+    def get_active_models(self):
+        """Returns a dict of role -> model_name for all loaded models."""
+        active = {}
+        for role, instance in self.loaded_models.items():
+            if hasattr(instance, 'model_name'):
+                active[role] = instance.model_name
+            elif hasattr(instance, 'model_path'):
+                # For local GGUF, get the filename as model name
+                active[role] = Path(instance.model_path).name
+            else:
+                active[role] = "unknown"
+        return active

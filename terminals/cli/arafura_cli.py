@@ -167,14 +167,15 @@ class ArafuraCortex:
             Layout(name="footer", size=3)
         )
         layout["main"].split_row(
-            Layout(name="left", ratio=2),
-            Layout(name="right", ratio=1)
+            Layout(name="left", ratio=1),  # Visual & Stream Layer
+            Layout(name="right", ratio=2)  # Chat & Logic Layer
         )
         layout["left"].split_column(
-            Layout(name="chat_panel", ratio=1)
+            Layout(name="vision_panel", ratio=1),
+            Layout(name="stream_panel", ratio=1)
         )
         layout["right"].split_column(
-            Layout(name="vision_panel", ratio=1),
+            Layout(name="chat_panel", ratio=2),
             Layout(name="thought_panel", ratio=1)
         )
         return layout
@@ -280,41 +281,29 @@ class ArafuraCortex:
         
         return Panel(content, title="[b]VISUAL CORTEX (LIFE)[/]", border_style="magenta", box=ROUNDED)
 
+    def render_reflection_stream(self):
+        # Capturamos el flujo actual del orquestador
+        # (Usamos una lista en el orquestador para ir acumulando tokens)
+        thought_log = getattr(self.orchestrator, 'thought_log', [])
+        
+        content = "".join(thought_log) if thought_log else "[dim]Esperando flujo de reflexión...[/]"
+        
+        title = "[b]REFLEXIÓN (STREAM)[/]"
+        if thought_log:
+            title += " [bold blink yellow]• LIVE[/]"
+            
+        return Panel(content, title=title, border_style="yellow", box=ROUNDED)
+
     def render_thoughts(self):
-        # Datos vienen del Orquestador
-        thought_log = self.orchestrator.thought_log
+        # Datos vienen del Orquestador (Pensamientos individuales/Historial)
+        # Mostramos los últimos pensamientos consolidados
+        thought_history = self.orchestrator.thought_log_history if hasattr(self.orchestrator, 'thought_log_history') else []
         
         content = ""
-        
-        # (H - 6) / 2 - border
-        avail_h = max(3, int((self.console.height - 8) / 2) - 2)
-        visible_lines = avail_h
-        
-        # Auto-scroll si no hay offset manual
-        if self.scroll_offsets['thought'] == 0:
-            subset = thought_log[-visible_lines:]
-            total = len(thought_log)
-        else:
-            subset, total = self._get_viewport(thought_log, self.scroll_offsets['thought'], visible_lines)
-        
-        for t in subset:
-            # Full text
-            cleaned = t.replace('\n', ' ')
-            content += f"> {cleaned}\n"
-        
-        # Title info
-        title = f"[b]FLUJO COGNITIVO[/]"
-        if total > visible_lines and self.scroll_offsets['thought'] > 0:
-            pos = total - self.scroll_offsets['thought']
-            title += f" [dim][{pos}/{total}][/]"
-        elif total > visible_lines:
-             # Bottom
-             title += f" [dim][Auto][/]"
+        for t in thought_history[-10:]:
+            content += f"> [cyan]{t}[/]\n"
             
-        ind = "[bold blink yellow]thinking...[/]" if self.orchestrator.lock.locked() else ""
-        if ind: title += f" {ind}"
-        
-        return Panel(content, title=title, border_style="cyan", box=ROUNDED)
+        return Panel(content, title="[b]PENSAMIENTO INDIVIDUAL (LOG)[/]", border_style="cyan", box=ROUNDED)
 
     def render_input(self):
         return Panel(self.input.get_renderable(), title="[b]COMANDO[/]", border_style="yellow", box=HEAVY)
@@ -347,9 +336,22 @@ class ArafuraCortex:
 
     def _async_process(self, cmd):
         try:
-            # El orchestrator maneja /ventana, chat, routing, etc.
-            response = self.orchestrator.process_input(cmd)
-            self.log_chat("ARAFURA", response, "magenta")
+            # Inicializar acumulador de stream en el orquestador
+            self.orchestrator.thought_log = []
+            if not hasattr(self.orchestrator, 'thought_log_history'):
+                self.orchestrator.thought_log_history = []
+            
+            full_response = ""
+            for token in self.orchestrator.process_stream(cmd):
+                full_response += token
+                # Actualizar log de stream (El panel izquierdo lo leerá)
+                self.orchestrator.thought_log.append(token)
+            
+            # Al terminar, guardamos el pensamiento consolidado en el historial (Panel derecho)
+            self.orchestrator.thought_log_history.append(full_response[:100] + "...") 
+            self.orchestrator.thought_log = [] # Limpiar stream
+            
+            self.log_chat("ARAFURA", full_response, "magenta")
         except Exception as e:
             self.log_chat("ERR", str(e), "red")
 
@@ -357,6 +359,7 @@ class ArafuraCortex:
         layout["header"].update(self.render_header())
         layout["chat_panel"].update(self.render_chat())
         layout["vision_panel"].update(self.render_vision())
+        layout["stream_panel"].update(self.render_reflection_stream())
         layout["thought_panel"].update(self.render_thoughts())
         layout["footer"].update(self.render_input())
 
@@ -366,11 +369,27 @@ class ArafuraCortex:
         # 1. Local GGUF
         local_models = sorted(list(models_dir.glob("*.gguf")), key=lambda x: x.stat().st_size)
         
-        # 2. Ollama Options
-        ollama_models = [
-            {"name": "DeepSeek-R1 (Ollama)", "source": "ollama", "id": "deepseek-r1"},
-            {"name": "Phi-2 (Ollama)", "source": "ollama", "id": "phi"}
-        ]
+        # 2. Ollama Options (Dynamic Fetch)
+        ollama_models = []
+        try:
+            import urllib.request
+            import json
+            with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2) as r:
+                if r.status == 200:
+                    tags = json.loads(r.read().decode('utf-8')).get('models', [])
+                    for m in tags:
+                        name = m['name']
+                        ollama_models.append({
+                            "name": f"{name} (Ollama)",
+                            "source": "ollama",
+                            "id": name
+                        })
+        except:
+            # Fallback if Ollama is offline
+            ollama_models = [
+                {"name": "DeepSeek-R1 (Ollama)", "source": "ollama", "id": "deepseek-r1"},
+                {"name": "Phi-2 (Ollama)", "source": "ollama", "id": "phi"}
+            ]
         
         all_options = local_models + ollama_models
 

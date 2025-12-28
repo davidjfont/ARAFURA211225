@@ -17,7 +17,7 @@ class VisionPipeline:
     - Differential Vision (Pixel Delta Detection)
     - Windows/Linux Compatibility
     """
-    def __init__(self, target_window=None, fps=5):
+    def __init__(self, target_window=None, fps=5, capture_lock=None):
         self.target_window = target_window
         self.fps = fps
         self.interval = 1.0 / fps
@@ -32,7 +32,8 @@ class VisionPipeline:
         
         # Config
         self.delta_threshold = 0.001  # 0.1% change required to trigger "changed"
-        self.lock = threading.Lock()
+        self.lock = threading.Lock() # Internal state lock
+        self.capture_lock = capture_lock # external shared resource lock (Arbiter)
 
     def start(self):
         """Starts the asynchronous capture loop"""
@@ -72,17 +73,22 @@ class VisionPipeline:
     def _capture_screen(self):
         """Platform-agnostic screen capture"""
         try:
-            if self.target_window:
-                # Capture specific window
-                w = self.target_window
-                bbox = (w.left, w.top, w.left + w.width, w.top + w.height)
-                img = ImageGrab.grab(bbox=bbox)
-            else:
-                # Full screen fallback
-                img = ImageGrab.grab()
-            
-            # Convert to NumPy for CV2 processing
-            return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+            # Arbiter Lock
+            if self.capture_lock: self.capture_lock.acquire()
+            try:
+                if self.target_window:
+                    # Capture specific window
+                    w = self.target_window
+                    bbox = (w.left, w.top, w.left + w.width, w.top + w.height)
+                    img = ImageGrab.grab(bbox=bbox)
+                else:
+                    # Full screen fallback
+                    img = ImageGrab.grab()
+                
+                # Convert to NumPy for CV2 processing
+                return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+            finally:
+                 if self.capture_lock: self.capture_lock.release()
         except Exception as e:
             # print(f"[VisionPipeline] Capture error: {e}")
             return None
@@ -165,14 +171,19 @@ class VisionPipeline:
         Used for Tile Scanning (500x500).
         """
         try:
-            # Capture using ImageGrab (efficient for regions)
-            img = ImageGrab.grab(bbox=bbox)
-            
-            # Convert to buffer
-            buffer = io.BytesIO()
-            img.save(buffer, format="PNG")
-            b64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            return b64_str
+            # Arbiter Lock
+            if self.capture_lock: self.capture_lock.acquire()
+            try:
+                # Capture using ImageGrab (efficient for regions)
+                img = ImageGrab.grab(bbox=bbox)
+                
+                # Convert to buffer
+                buffer = io.BytesIO()
+                img.save(buffer, format="PNG")
+                b64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                return b64_str
+            finally:
+                if self.capture_lock: self.capture_lock.release()
         except Exception as e:
             print(f"[VisionPipeline] Region capture error: {e}")
             return None

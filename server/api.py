@@ -120,28 +120,69 @@ async def websocket_endpoint(websocket: WebSocket):
                 }
             })
             
+            # 3. Model Info
+            models = ORCHESTRATOR.router.get_active_models()
+            chat_m = models.get('chat', 'offline')
+            vis_m = models.get('vision', 'offline')
+            ref_m = models.get('reflexion', 'offline')
+            
             await websocket.send_json({
                 "type": "system", 
-                "payload": {"msg": "Connected to ARAFURA Core. History Sync Complete."}
+                "payload": {"msg": f"Connected to ARAFURA Core. Models: chat:{chat_m}, visual:{vis_m}, reflection:{ref_m}"}
             })
             
-        while True:
-            data = await websocket.receive_text()
-            # User Input from Web
-            if ORCHESTRATOR:
-                # Run process_input in a thread to not block WS loop
-                # We assume process_input returns the string response
-                # But we want the RESPONSE to also flow back via the callback?
-                # The CLI flow was: response = process_input()...
-                # Here:
-                loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(None, ORCHESTRATOR.process_input, data)
+        async def handle_input(text_data):
+            if not ORCHESTRATOR: return
+            
+            # 0. Parsing structured commands vs raw chat
+            try:
+                data = json.loads(text_data)
+                msg_type = data.get("type")
+                payload = data.get("payload")
                 
-                # Send response back directly (User-Request -> Response)
+                if msg_type == "set_power":
+                    ORCHESTRATOR.set_power_level(payload.get("level", 5.0))
+                    return
+            except:
+                # Not JSON? Treat as raw chat input
+                data = text_data
+
+            loop = asyncio.get_running_loop()
+            
+            # Usar process_stream si está disponible para feedback en tiempo real
+            if hasattr(ORCHESTRATOR, 'process_stream'):
+                def run_stream():
+                    # full_resp = [] # No longer needed for final concat if we rely on chunks
+                    for token in ORCHESTRATOR.process_stream(data):
+                        pass # Tokens are already being emitted via callback? 
+                        # Wait, tokens are yielded, not emitted.
+                    return "" # Return empty as streaming is handled elsewhere or via yield logic
+                
+                # In current orchestrator, process_stream is a generator.
+                # api.py used to collect it. Let's make api.py emit chunks if possible.
+                
+                def run_and_collect():
+                    chunks = []
+                    for token in ORCHESTRATOR.process_stream(data):
+                        chunks.append(token)
+                    return "".join(chunks)
+
+                response = await loop.run_in_executor(None, run_and_collect)
+            else:
+                response = await loop.run_in_executor(None, ORCHESTRATOR.process_input, data)
+            
+            # Send response back directly (Final Result)
+            try:
                 await websocket.send_json({
                     "type": "chat_response",
                     "payload": {"role": "ARAFURA", "content": response}
                 })
+            except: pass
+
+        while True:
+            text_data = await websocket.receive_text()
+            # Create a background task for each message so the main loop can receive next (e.g. STOP)
+            asyncio.create_task(handle_input(text_data))
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
