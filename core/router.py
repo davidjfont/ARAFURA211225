@@ -207,8 +207,8 @@ class ModelRouter:
                                  found = False
                                  for m in tags:
                                      m_name = m['name']
-                                     # Match "model" with "model:latest" or "model:7b"
-                                     if m_name == match_pattern or m_name.startswith(match_pattern + ":"):
+                                     # Match "model" with "model:latest" or "model:7b" OR partial match
+                                     if m_name == match_pattern or m_name.startswith(match_pattern + ":") or match_pattern in m_name:
                                          print(f"[Router] Encontrado en Ollama: {m_name}")
                                          wrapper = OllamaWrapper(model_name=m_name)
                                          self.loaded_models[role] = wrapper
@@ -263,7 +263,7 @@ class ModelRouter:
         
         if task_type in ["thought", "reflexion"]:
             selected_role = "reflexion"
-        elif task_type in ["visual", "visual_perception", "image_analysis"]:
+        elif task_type in ["visual", "visual_perception", "image_analysis", "visual_chat"]:
             selected_role = "vision"
         elif task_type in ["logic", "code", "analysis", "complex_logic"]:
             selected_role = "deep_thought"
@@ -336,6 +336,7 @@ class ModelRouter:
         
         try:
             # Force JSON mode for specific task types if using a model that supports it
+            # 'visual' enforces JSON (for Autonomy). 'visual_chat' allows free text (for Cortex).
             json_requested = task_type in ["visual", "complex_logic", "json_data"]
             
             res = llm.create_chat_completion(

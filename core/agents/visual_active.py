@@ -363,11 +363,30 @@ class VisualAgent:
             # Try Precision Capture (Win32)
             img = self._capture_win32(hwnd)
             
-            # Fallback to standard ImageGrab if win32 fails
+            # Check for Black Screen (Common in Chrome/Hardware Accel)
+            is_black = False
+            if img:
+                extrema = img.getextrema()
+                if extrema:
+                    # For RGB, extrema is list of tuples. For L, single tuple.
+                    # Simple heuristic: if all max values are 0 (black)
+                    if isinstance(extrema[0], tuple): # RGB
+                        is_black = all(x[1] == 0 for x in extrema)
+                    else:
+                        is_black = extrema[1] == 0
+                
+                if is_black:
+                    print("[VisualAgent] Warng: Win32 captured black frame. Falling back.")
+                    img = None
+
+            # Fallback to standard ImageGrab if win32 fails or is black
             if not img:
                 w = self.active_window
-                bbox = (w.left, w.top, w.left + w.width, w.top + w.height)
-                img = ImageGrab.grab(bbox=bbox)
+                try:
+                    bbox = (w.left, w.top, w.left + w.width, w.top + w.height)
+                    img = ImageGrab.grab(bbox=bbox)
+                except Exception:
+                    pass # Keep img as None
             
             if not img: return None
 

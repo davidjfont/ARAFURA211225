@@ -19,7 +19,7 @@ roles:
   # Capa Visual (Vision-Language Models)
   vision:
     source: "ollama"
-    model_match: ["qwen3-vl:8b", "llava"] 
+    model_match: ["qwen3", "qwen", "llava"] 
     task_types: ["visual_perception", "image_analysis"]
     params:
       n_ctx: 8192 # Qwen3 handles more context effectively

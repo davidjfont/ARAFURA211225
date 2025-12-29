@@ -14,6 +14,7 @@ from core.memory_vector import VectorMemory
 import pyautogui
 from core.rag_manager import RAGManager
 from core.local_ocr import LocalOCREngine
+from core.nervous_system import ReflexController
 
 class SystemState:
     """Formalizes ARAFURA's cognitive and operational state."""
@@ -93,8 +94,11 @@ class ArafuraOrchestrator:
         # simpler: define lock earlier.
         self.vision_pipeline = VisionPipeline(fps=5, capture_lock=self.perception_lock) # 5 FPS is enough for intelligence
         
-        # 3.1 Inicializar Sensor OCR Local (Tesseract)
-        self.ocr_engine = LocalOCREngine()
+        # 3.1 OCR Engine (Disbled in v5.1 favor of VLM)
+        # self.ocr_engine = LocalOCREngine()
+
+        # 3.2 Inicializar Sistema Nervioso (Level 0 Autonomy)
+        self.nervous_system = ReflexController()
 
         # NO iniciar threads aquí para evitar interferir con el foco del terminal inicial
         
@@ -139,6 +143,7 @@ class ArafuraOrchestrator:
         # LIFE MOMENTS 🌿
         self.last_activity_time = time.time()
         self.last_life_thought_time = 0
+        self.last_monitor_time = 0 # Fix startup crash
         self.idle_threshold = 120  
 
     def _load_knowledge(self):
@@ -214,11 +219,40 @@ class ArafuraOrchestrator:
             import re
             response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
 
-        # 1. Classic Syntax: [[ACTION: click 100, 200]]
+        # 1. Classic Syntax: [[ACTION: click 100, 200]] OR [[ACTION: click 100 200]]
+        # Supports normalized integers (0-1000) for scaling
         if "[[ACTION:" in response:
             import re
             matches = re.findall(r"\[\[ACTION: (.*?)\]\]", response)
-            commands.extend(matches)
+            
+            for m in matches:
+                parts = m.strip().split()
+                cmd = parts[0].lower()
+                
+                # Normalize CLICK/MOVE coords if they look like integers 0-1000
+                if cmd in ["click", "move"] and len(parts) >= 3:
+                     try:
+                         raw_x = float(parts[1].replace(',', ''))
+                         raw_y = float(parts[2].replace(',', ''))
+                         
+                         # Heuristic: If coords are <= 1000 and > 1, assume normalized 1000 scale
+                         if 1 < raw_x <= 1000 and 1 < raw_y <= 1000:
+                             final_x = int((raw_x / 1000.0) * w)
+                             final_y = int((raw_y / 1000.0) * h)
+                             commands.append(f"{cmd} {final_x} {final_y}")
+                         else:
+                             # Assume absolute pixels or float 0-1 (handled elsewhere but simpler here to pass through)
+                             if raw_x <= 1.0: 
+                                 final_x = int(raw_x * w)
+                                 final_y = int(raw_y * h)
+                                 commands.append(f"{cmd} {final_x} {final_y}")
+                             else:
+                                 # Raw pixels
+                                 commands.append(f"{cmd} {int(raw_x)} {int(raw_y)}")
+                     except:
+                         commands.append(m) # Fallback to raw string
+                else:
+                    commands.append(m)
 
         # 2. JSON Syntax (Common in LLaVA/DeepSeek)
         try:
@@ -249,8 +283,12 @@ class ArafuraOrchestrator:
                         y = act.get("y", 0)
                         # Handle relative coords
                         if isinstance(x, float) and x <= 1.0: x = int(x * w)
+                        elif x > 1 and x <= 1000: x = int((x / 1000.0) * w) # Support 0-1000 ints
+
                         if isinstance(y, float) and y <= 1.0: y = int(y * h)
-                        commands.append(f"{mode} {x} {y}")
+                        elif y > 1 and y <= 1000: y = int((y / 1000.0) * h)
+
+                        commands.append(f"{mode} {int(x)} {int(y)}")
                     elif mode == "type":
                         text = act.get("text", "")
                         commands.append(f"type {text}")
@@ -451,9 +489,15 @@ class ArafuraOrchestrator:
                 if getattr(self.visual, 'active_window', None):
                     captured_img = self.visual.capture_frame()
                     if captured_img:
+                         # Optimize: Resize and use JPEG
+                         img_copy = captured_img.copy()
+                         img_copy.thumbnail((1024, 1024))
+                         if img_copy.mode != 'RGB':
+                             img_copy = img_copy.convert('RGB')
+                         
                          import io, base64
                          buf = io.BytesIO()
-                         captured_img.save(buf, format="PNG")
+                         img_copy.save(buf, format="JPEG", quality=80)
                          b64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
                          images = [b64_img]
                          task_type = "visual"
@@ -492,6 +536,18 @@ class ArafuraOrchestrator:
             if self.state.hitl_paused:
                 self.state.hitl_paused = False
                 self._emit_event("visual_log", {"msg": "▶️ Resuming from HITL via chat input."})
+
+            # SMART FALLBACK: If Vision returned nothing (e.g. conversational query), try Chat
+            if not full_response.strip() and self.system_mode == "vision":
+                print("[Orchestrator] Vision yielded empty response. Falling back to Chat.")
+                for token in self.router.stream_request(
+                    task_type="chat",
+                    prompt=user_input,
+                    system_prompt=f"{self.identity}\n[Context: User asked this while in Vision Mode, but visual analysis was not applicable.]",
+                    context_messages=self.context_history
+                ):
+                     full_response += token
+                     yield token
 
             # 2. Final Logic (Post-Stream)
             final_response = self._finalize_response(full_response, regions if 'regions' in locals() else images)
@@ -736,20 +792,57 @@ class ArafuraOrchestrator:
             if not captured:
                 return "Error: No se pudo capturar frame."
             
+            # Optimize: Resize and use JPEG
+            img_copy = captured.copy()
+            img_copy.thumbnail((1024, 1024))
+            
             import io, base64
             buf = io.BytesIO()
-            captured.save(buf, format="PNG")
+            img_copy.save(buf, format="JPEG", quality=80)
             b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
             
             res = self.router.route_request(
-                task_type="visual",
+                task_type="visual_chat",
                 prompt=query,
+                system_prompt=(
+                    "You are ARAFURA's Visual Cortex. "
+                    "IF USER ASKS FOR DESCRIPTION: Describe elements with normalized coords [X, Y] (0-1000). "
+                    "IF USER GIVES A COMMAND: Be extremely concise. Identify target, output [[ACTION: click X Y]] immediately, and stop."
+                ),
                 images=[b64]
             )
             self._emit_event("vision_frame", {"image": b64})
+            
+            # UPGRADE: Execute actions if found in Cortex thought
+            # Extract actions using the existing parser
+            actions = self._extract_actions(res, img_size=(captured.width, captured.height))
+            if actions:
+                for act_cmd in actions:
+                    self._emit_event("visual_log", {"msg": f"⚡ Cortex Executing: {act_cmd}"})
+                    # Reformat for VisualAgent: "click 10 10" -> {"decision": "click 10 10"}
+                    # _extract_actions returns strings. VisualAgent expects JSON? 
+                    # Checking VisualAgent.execute_decision: expects dict with 'decision'.
+                    self.visual.execute_decision({"decision": act_cmd})
+                return f"🧠 **CORTEX (Acción Ejecutada):**\n{res}"
+            
             return f"🧠 **ANÁLISIS DE CORTEX:**\n{res}"
 
         return "Comando desconocido"
+
+    def start(self):
+        """Inicia los hilos de fondo del sistema."""
+        if not self.running:
+            return
+
+        # 1. Background Logic Loop (Vision, Thought, etc)
+        t_bg = threading.Thread(target=self.run_background_loop, daemon=True, name="ArafuraCoreLoop")
+        t_bg.start()
+        
+        # 2. Mouse Feedback Loop (High Refresh)
+        t_mouse = threading.Thread(target=self.run_mouse_loop, daemon=True, name="ArafuraMouseLoop")
+        t_mouse.start()
+        
+        print("[Orchestrator] System Threads Started.")
 
 
     def run_mouse_loop(self):
@@ -769,11 +862,47 @@ class ArafuraOrchestrator:
             try:
                 now = time.time()
                 
+                # Ensure pipeline is running
+                if not self.vision_pipeline.running:
+                    self.vision_pipeline.start()
+                
                 # 1. Ciclo de Salud y Telemetría
                 self._cycle_monitor_ui(now)
                 
                 # 2. Ciclo de Visión y Autonomía
+                # 2. Ciclo de Visión y Autonomía
                 if not self.state.hitl_paused and not self.state.interrupt_signal.is_set():
+                    # REFLEX CHECK (Level 0) - Runs every cycle (high freq)
+                    # For safety, we only process vision if active window exists.
+                    if self.visual and getattr(self.visual, 'active_window', None):
+                        # Capture small frame for reflex analysis
+                        # FIX: VisionPipeline does not have get_latest_frame_pil, so we convert manual or use visual agent
+                        try:
+                            # Option A: Get current CV2 frame from pipeline and convert
+                            cv_frame = self.vision_pipeline.get_current_cv()
+                            if cv_frame is not None:
+                                # Convert BGR to RGB
+                                import cv2
+                                from PIL import Image
+                                rgb_frame = cv2.cvtColor(cv_frame, cv2.COLOR_BGR2RGB)
+                                frame = Image.fromarray(rgb_frame)
+                            else:
+                                # Fallback to slow capture
+                                frame = self.visual.capture_frame()
+                        except Exception:
+                            frame = None
+                        
+                        if frame:
+                            signal = self.nervous_system.process_frame(frame, self.state.strategy)
+                            
+                            if signal == "MOTION":
+                                # Wake up autonomy if active or gamer
+                                self._execute_vision_reflex_action(signal)
+                            elif signal == "STILL":
+                                 # If still for too long, maybe look deeper?
+                                 pass
+
+                    # FULL AUTONOMY CYCLE (Level 2) - Conditioned
                     self._cycle_vision_autonomy(now)
                 
                 # 3. Ciclo de Reflexión Estratégica
@@ -825,13 +954,21 @@ class ArafuraOrchestrator:
                 "mode": mode_display
             })
 
+    def _execute_vision_reflex_action(self, signal):
+        """Action taken purely on nervous system signal (Fast Path)"""
+        # If GAMER, maybe click? For now, we just Log it as "Reflex" and pass to Autonomy if critical.
+        if self.state.gamer_mode:
+            # In gamer mode, any motion implies need for attention
+             self.last_perception_time = 0 # Force immediate deep cycle
+             
     def _cycle_vision_autonomy(self, now):
         """Ciclo crítico de percepción visual y acción"""
         # Power scaling: 1.0 (5s) -> 10.0 (0.2s)
         if self.state.power_level >= 9.0:
-            vision_interval = 0.2
+            vision_interval = 0.1 # Ultra-Instinct
         else:
-            base_interval = 2.0 if not self.state.gamer_mode else 1.0
+            # TURBO DEFAULT: 0.5s instead of 2.0s
+            base_interval = 0.5 if not self.state.gamer_mode else 0.3
             vision_interval = base_interval / (self.state.power_level / 5.0)
 
         if self.visual and getattr(self.visual, 'active_window', None) and now - self.last_perception_time > vision_interval:
@@ -850,10 +987,16 @@ class ArafuraOrchestrator:
                     return base64.b64encode(buf.getvalue()).decode('utf-8')
                 b64_crop = encode_pil(crop_img) if crop_img else None
 
-                # Emit Feed
+                # Emit Feed (Visual Cortex + Lupa) - ALWAYS ON if window active
                 self._emit_event("vision_frame", {"image": b64_img})
                 if b64_crop:
                     self._emit_event("vision_crop", {"image": b64_crop})
+
+                # STATE-DRIVEN ACTION BYPASS:
+                # If we are in OBSERVATION mode, do not act autonomously.
+                # We simply watch (emission above) and return.
+                if self.state.strategy == "OBSERVATION" and not self.state.autonomy_active:
+                     return
 
                 if self.system_mode == "vision":
                     w, h = self.visual.active_window.width, self.visual.active_window.height
@@ -992,185 +1135,129 @@ class ArafuraOrchestrator:
         
         # QUERY VECTOR MEMORY: Has I seen this before?
         win_title = self.visual.active_window.title if self.visual.active_window else "Desconocida"
-        memory_data = self.window_knowledge.get(win_title, {})
-        past_experiences = self.vector_memory.query_experience(f"Ventana: {win_title} en Streamlit")
-        exp_context = json.dumps(past_experiences, ensure_ascii=False) if past_experiences else "No past history."
-
-        llava_prompt = f"""SCREENSHOT: {w}x{h} pixels.
-WINDOW TYPE: STREAMLIT / WEB APP.
-{strategy_context}
-PAST EXPERIENCES: {exp_context}
-MEMORY FOR THIS WINDOW: {json.dumps(memory_data.get('buttons', []))}
-
-Identify clickable elements (st.button, tabs, expanders).
-PRIORITIZE elements where hovering might change the UI.
-
-OUTPUT ONLY JSON:
-{{"buttons":[{{"label":"text","x":0.5,"y":0.5}}],"hover_targets":[{{"x":0.5,"y":0.5}}]}}"""
+        
+        # New Cognitive Prompt (Unified)
+        llava_prompt = (
+            f"CONTEXT: {strategy_context}\n"
+            f"WINDOW: {win_title}\n"
+            "Analyze the screen state. Determine the next best action aligned with the user's goal.\n"
+            "Output a short strategic thought AND if action is needed, use syntax: [[ACTION: click X Y]] (normalized 0-1000)."
+        )
 
         images = [b64_img]
-        if b64_crop: images.append(b64_crop)
-
-        llava_response = self.router.route_request(
-            task_type="visual",
-            prompt=llava_prompt,
-            images=images
-        )
-        
-        # STEP 2: DeepSeek (Brain) - Strategic Reasoning with Hover
-        remaining = int(self.autonomy_end_time - time.time())
-        score_diff = 0
-        # Calculate gain if possible
-        if hasattr(self.monitor, 'equity'):
-            score_diff = self.monitor.equity - memory_data.get('last_equity', self.monitor.equity)
-
-        deepseek_prompt = f"""LLAVA SAW: {llava_response[:500]}
-{strategy_context}
-PREVIOUS SUCCESSFUL BUTTONS: {json.dumps(memory_data.get('success_actions', []))}
-LAST SCORE GAIN: {score_diff}
-
-Time left: {remaining}s.
-CHOOSE ONE:
-- `{{"type":"move", "x": 0.XX, "y": 0.XX}}` to LEARN (hover)
-- `{{"type":"click", "x": 0.XX, "y": 0.XX}}` to SCORE (if likely effective)
-
-Think like a GAMER. Explore first, then exploit."""
-
-        deepseek_response = self.router.route_request(
-            task_type="deep_thought",
-            prompt=deepseek_prompt
-        )
-        
-        # LOG COGNITIVE FLOW
-        thought_msg = f"🧠 Reasoning: {deepseek_response[:200]}..."
-        self.thought_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {thought_msg}")
-        self._emit_event("thought_log", {"msg": thought_msg})
-        
-        # STEP 3: Execute & Learn
+        # Use visual_chat to allow mixed text + action syntax
         try:
-            json_match = None
-            if "{" in deepseek_response:
-                start = deepseek_response.index("{")
-                end = deepseek_response.rindex("}") + 1
-                json_match = deepseek_response[start:end]
+            res = self.router.route_request(
+                task_type="visual_chat",
+                prompt=llava_prompt,
+                images=images
+            )
             
-            if json_match:
-                decision = json.loads(json_match)
-                action = decision.get("action", decision) # Support both nesting types
+            if res:
+                # Log Thought (Clean <think> blocks)
+                clean_res = res
+                if "<think>" in res:
+                    import re
+                    clean_res = re.sub(r"<think>.*?</think>", "", res, flags=re.DOTALL).strip()
                 
-                atype = action.get("type", "wait")
-                x, y = action.get("x", 0), action.get("y", 0)
-                abs_x = int(x * w) if x <= 1 else int(x)
-                abs_y = int(y * h) if y <= 1 else int(y)
+                self.thought_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {clean_res[:100]}...")
+                self._emit_event("visual_log", {"msg": f"🧠 LOOP REFLECTION: {clean_res[:100]}..."})
                 
-                self.last_autonomy_action = f"{atype} ({abs_x}, {abs_y})"
-                log_msg = f"🤖 ACTION: {self.last_autonomy_action}"
-                self.visual_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {log_msg}")
-                self._emit_event("visual_log", {"msg": log_msg})
-                
-                # Record state before action
-                pre_equity = self.monitor.equity
-
-                if atype == "move":
-                    self.visual.execute_decision({"decision": f"move {abs_x}, {abs_y}"})
-                    self.autonomy_action_count += 1
-                    time.sleep(0.5)
-                elif atype == "click":
-                    self.visual.execute_decision({"decision": f"click {abs_x}, {abs_y}"})
-                    self.autonomy_action_count += 1
-                    
-                    # Persistent Learning
-                    time.sleep(1.0) # Wait for UI reaction
-                    post_equity = self.monitor.equity
-                    
-                    if win_title not in self.window_knowledge:
-                        self.window_knowledge[win_title] = {"buttons": [], "success_actions": [], "last_equity": 0}
-                    
-                    self.window_knowledge[win_title]["last_equity"] = post_equity
-                    
-                    if post_equity > pre_equity:
-                        self._emit_event("visual_log", {"msg": "💎 PROFIT DETECTADO! Guardando acción exitosa."})
-                        self.window_knowledge[win_title]["success_actions"].append({"x": x, "y": y, "gain": post_equity - pre_equity})
-                        # SAVE TO VECTOR MEMORY
+                # Execute Actions
+                actions = self._extract_actions(res, (w, h))
+                if actions:
+                    for act_cmd in actions:
+                        self.autonomy_action_count += 1
+                        
+                        # PROFIT CHECK: Pre-Action
+                        pre_equity = self.monitor.equity
+                        
+                        self._emit_event("visual_log", {"msg": f"⚡ AUTONOMY EXEC: {act_cmd}"})
+                        self.visual.execute_decision({"decision": act_cmd})
+                        
+                        # PROFIT CHECK: Post-Action (Brief Wait)
+                        # In a real async system, we'd check this later. here we cheat slightly for immediate feedback.
+                        time.sleep(0.2) 
+                        post_equity = self.monitor.equity
+                        
+                        outcome = "Neutral"
+                        if post_equity > pre_equity:
+                            outcome = f"PROFIT (+{post_equity - pre_equity:.2f})"
+                            self._emit_event("visual_log", {"msg": f"💎 {outcome}"})
+                        
+                        # Store experience
                         self.vector_memory.store_experience(
                             category="visual",
-                            observation=f"Botón pulsado en {win_title} en ({x}, {y})",
-                            action=f"click {x} {y}",
-                            outcome=f"Profit Increase: {post_equity - pre_equity}"
+                            observation=f"Action in {win_title}",
+                            action=act_cmd,
+                            outcome=outcome
                         )
+                else:
+                    self._emit_event("visual_log", {"msg": "👁️ Watching..."})
                     
-                    self._save_knowledge()
-
         except Exception as e:
-            print(f"Autonomy Loop Exec Error: {e}")
+            print(f"Autonomy Loop Error: {e}")
+
+
+
 
     def scan_screen_routine(self):
         """
-        ARAFURA v6.0 - Spatial Tile Scan (Gravity Protocol)
-        Scans the screen in 500x500 increments to build a spatial map.
+        ARAFURA v6.1 - Cognitive Reflection Routine (Holistic Vision)
+        Replaces legacy 'Spatial Mapping' tile scan with a strategic full-screen assessment.
         """
-        print("[Orchestrator] Initiating Gravity Spatial Scan (500x500)...")
-        self._emit_event("visual_log", {"msg": "📡 INITIATING SPATIAL MAPPING (500px TILES)..."})
+        print("[Orchestrator] Initiating Cognitive Reflection (Strategy Assessment)...")
+        self._emit_event("visual_log", {"msg": "🧠 INICIANDO REFLEXIÓN ESTRATÉGICA (COGNITIVE FLOW)..."})
         
-        # Load Gravity Prompt
-        prompt_path = self.base_path / "core" / "prompts" / "gravity_scan.md"
-        if not prompt_path.exists():
-            print("[!] Gravity Prompt not found.")
+        # 1. Capture Full Context
+        captured = self.visual.capture_frame()
+        if not captured:
+            self._emit_event("visual_log", {"msg": "❌ No visual input for reflection."})
             return
 
-        gravity_prompt = prompt_path.read_text(encoding='utf-8')
+        # Optimize Image
+        img_copy = captured.copy()
+        img_copy.thumbnail((1024, 1024))
+        if img_copy.mode != 'RGB': img_copy = img_copy.convert('RGB')
         
-        # Get Screen Size
-        w, h = pyautogui.size()
-        tile_size = 500
+        import io, base64
+        buf = io.BytesIO()
+        img_copy.save(buf, format="JPEG", quality=80)
+        b64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
         
-        spatial_memory = []
+        # 2. Strategic Prompt
+        # Uses the last user input to contextualize the reflection
+        last_user_msg = self.context_history[-1]['content'] if self.context_history else "System Idle"
         
-        # Grid Traversal (Row by Row)
-        for y in range(0, h, tile_size):
-            for x in range(0, w, tile_size):
-                # Calculate BBox (ensure within bounds)
-                x2 = min(x + tile_size, w)
-                y2 = min(y + tile_size, h)
-                bbox = (x, y, x2, y2)
-                
-                print(f"[Scan] Processing Tile: {bbox}")
-                self._emit_event("visual_log", {"msg": f"👁️ Scanning Tile: ({x},{y}) -> ({x2},{y2})"})
-                
-                # 1. Capture High-Fidelity Crop
-                b64_crop = self.vision_pipeline.get_region_crop(bbox)
-                
-                if b64_crop:
-                    # 2. Analyze with Vision Model (Gravity)
-                    # We use a specialized routing request for "mapping"
-                    # Note: We append the tile coordinates to the prompt for context
-                    context_prompt = f"{gravity_prompt}\n\nCURRENT TILE COORDINATES: {bbox}\nANALYZE THIS REGION."
-                    
-                    response = self.router.route_request("vision", context_prompt, image_b64=b64_crop)
-                    
-                    # 3. Store Result
-                    if response:
-                        tile_data = {
-                            "bbox": bbox,
-                            "analysis": response,
-                            "timestamp": datetime.now().isoformat()
-                        }
-                        spatial_memory.append(tile_data)
-                        
-                        # Log success
-                        log_msg = f"✅ Tile Mapped: {bbox}"
-                        self.visual_log.append(log_msg)
-                        self._emit_event("visual_log", {"msg": log_msg})
-                
-                # Small delay to prevent rate limits or visual overwhelmed
-                time.sleep(0.5)
+        prompt = (
+            f"USER CONTEXT: '{last_user_msg}'\n"
+            "Analyze the screen. Identify the most relevant UI elements for the user's goal.\n"
+            "Determine the next best strategic move (e.g., click specific button, type text, or wait).\n"
+            "Output a concise strategic thought AND if action is needed, use syntax: [[ACTION: click X Y]] (normalized 0-1000)."
+        )
         
-        print(f"[Orchestrator] Spatial Scan Complete. Mapped {len(spatial_memory)} tiles.")
-        self._emit_event("visual_log", {"msg": f"🗺️ SPATIAL MAP COMPLETE ({len(spatial_memory)} Tiles). Ready for Action."})
+        # 3. Route to Vision/Reasoning Model
+        res = self.router.route_request(
+            task_type="visual_chat", # Use visual_chat to allow mixed thought+action syntax
+            prompt=prompt,
+            images=[b64_img]
+        )
         
-        # Store in Memory (Vector/JSONL) - For now, just keep in transient memory
-        # In a real impl, this would go to self.memory.save_spatial_map(spatial_memory)
-        self.context_history.append({"type": "spatial_map", "data": spatial_memory})
+        # 4. Log and Emit
+        if res:
+            msg = f"🧠 REFLECTION: {res}"
+            self.thought_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            self._emit_event("visual_log", {"msg": msg})
+            self._emit_event("thought_stream", {"token": f"\n[R] {res}", "is_thinking": True})
+            
+            # 5. EXECUTE ACTIONS
+            # Reuse extraction logic
+            actions = self._extract_actions(res, (captured.width, captured.height))
+            if actions:
+                for act_cmd in actions:
+                    self._emit_event("visual_log", {"msg": f"⚡ AUTONOMY EXEC: {act_cmd}"})
+                    self.visual.execute_decision({"decision": act_cmd})
+                    self.autonomy_action_count += 1
 
     def run_ocr_scan(self):
         """
